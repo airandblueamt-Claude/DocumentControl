@@ -210,6 +210,29 @@ class LLMClassifierBase(EmailClassifier):
         self._max_body_chars = 2000
         self._fallback_on_error = True
 
+    @staticmethod
+    def _extract_text(resp):
+        """Safely extract text from an LLM response, handling dict/object parts."""
+        # Try .text first (works for most responses)
+        try:
+            return resp.text.strip()
+        except (TypeError, AttributeError):
+            pass
+        # Fallback: walk candidates → parts and extract text manually
+        try:
+            parts = resp.candidates[0].content.parts
+            texts = []
+            for p in parts:
+                if isinstance(p, str):
+                    texts.append(p)
+                elif hasattr(p, 'text'):
+                    texts.append(p.text)
+                elif isinstance(p, dict) and 'text' in p:
+                    texts.append(p['text'])
+            return ''.join(texts).strip()
+        except (IndexError, KeyError, AttributeError, TypeError):
+            raise ValueError(f"Cannot extract text from response: {resp}")
+
     def _email_summary(self, msg_data, body_limit=None):
         """Build a text summary of the email for the prompt."""
         if body_limit is None:
@@ -400,7 +423,7 @@ class GeminiClassifier(LLMClassifierBase):
                     response_schema=self._scope_json_schema(),
                 ),
             )
-            return self._parse_scope_response(resp.text.strip())
+            return self._parse_scope_response(self._extract_text(resp))
         except Exception as exc:
             logger.warning("Gemini is_in_scope failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:
@@ -418,7 +441,7 @@ class GeminiClassifier(LLMClassifierBase):
                     response_schema=self._classify_json_schema(),
                 ),
             )
-            return self._parse_classify_response(resp.text.strip())
+            return self._parse_classify_response(self._extract_text(resp))
         except Exception as exc:
             logger.warning("Gemini classify failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:

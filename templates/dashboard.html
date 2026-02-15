@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Document Control - Email Monitor</title>
     <style>
         :root {
@@ -29,32 +29,35 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             line-height: 1.5;
-            font-size: 13px;
+            font-size: 14px;
+            -webkit-text-size-adjust: 100%;
+            overflow-x: hidden;
         }
 
         /* ---- Header ---- */
         header {
             background: var(--header-bg);
             color: #fff;
-            padding: 0 28px;
-            height: 56px;
+            padding: 0 16px;
+            height: 52px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
         }
-        header h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
-        .header-right { display: flex; align-items: center; gap: 16px; }
+        header h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; white-space: nowrap; }
+        .header-right { display: flex; align-items: center; gap: 10px; }
         .status-pill {
-            display: flex; align-items: center; gap: 7px;
-            font-size: 12px; font-weight: 500;
-            padding: 5px 14px; border-radius: 20px;
+            display: flex; align-items: center; gap: 6px;
+            font-size: 11px; font-weight: 500;
+            padding: 4px 10px; border-radius: 20px;
             background: rgba(255,255,255,0.08);
         }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
         .status-dot.idle { background: #22c55e; }
         .status-dot.scanning { background: var(--warn); animation: pulse 1s infinite; }
         .status-dot.error { background: var(--danger); }
@@ -65,17 +68,22 @@
             background: var(--card);
             border-bottom: 1px solid var(--border);
             display: flex;
-            padding: 0 28px;
-            gap: 4px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            padding: 0 8px;
         }
+        .tab-bar::-webkit-scrollbar { display: none; }
         .tab-btn {
-            padding: 14px 18px;
+            padding: 12px 14px;
             font-size: 13px; font-weight: 600;
             color: var(--text-muted);
             background: none; border: none;
             cursor: pointer;
             border-bottom: 2px solid transparent;
             transition: all .15s;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
         .tab-btn:hover { color: var(--text); }
         .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
@@ -91,50 +99,59 @@
         .tab-panel.active { display: block; }
 
         /* ---- Layout ---- */
-        .container { max-width: 1440px; margin: 0 auto; padding: 20px 28px; }
+        .container { max-width: 1440px; margin: 0 auto; padding: 12px; }
 
         /* ---- Control Bar (scanner + classifier) ---- */
         .control-bar {
-            display: flex; gap: 14px; margin-bottom: 18px;
+            display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;
         }
         .control-card {
             background: var(--card); border-radius: var(--radius);
-            box-shadow: var(--shadow); padding: 16px 20px;
-            display: flex; align-items: center; gap: 20px;
+            box-shadow: var(--shadow); padding: 12px 14px;
         }
-        .control-card.scanner { flex: 1; }
-        .control-card.classifier { min-width: 260px; flex-direction: column; align-items: flex-start; gap: 8px; }
-        .ctrl-items { display: flex; gap: 24px; flex: 1; }
+        .control-card.scanner {
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .control-card.classifier { display: flex; flex-direction: column; gap: 6px; }
+        .ctrl-items {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
         .ctrl-item { display: flex; flex-direction: column; }
         .ctrl-label { font-size: 10px; color: var(--text-light); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
-        .ctrl-value { font-size: 13px; font-weight: 600; color: var(--text); }
+        .ctrl-value { font-size: 12px; font-weight: 600; color: var(--text); word-break: break-word; }
         .ctrl-value.ok { color: var(--success); }
         .ctrl-value.err { color: var(--danger); }
+        .scanner-actions { display: flex; justify-content: flex-end; }
 
-        .clf-row { display: flex; align-items: center; gap: 8px; }
+        .clf-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .clf-badge {
             display: inline-flex; align-items: center; gap: 5px;
-            font-size: 12px; font-weight: 600;
-            padding: 4px 12px; border-radius: 6px;
+            font-size: 11px; font-weight: 600;
+            padding: 4px 10px; border-radius: 6px;
             background: #f1f5f9; color: var(--text);
+            word-break: break-word;
         }
-        .clf-dot { width: 7px; height: 7px; border-radius: 50%; }
+        .clf-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
         .clf-dot.ai { background: var(--purple); }
         .clf-dot.keywords { background: var(--warn); }
-        .clf-keys { display: flex; gap: 5px; }
+        .clf-keys { display: flex; gap: 4px; flex-wrap: wrap; }
         .key-pill {
             font-size: 10px; font-weight: 600;
-            padding: 2px 8px; border-radius: 4px;
+            padding: 2px 7px; border-radius: 4px;
         }
         .key-pill.on { background: #dcfce7; color: #166534; }
         .key-pill.off { background: #f1f5f9; color: var(--text-light); }
 
         /* ---- Buttons ---- */
         .btn {
-            border: none; padding: 6px 14px; border-radius: 6px;
-            font-size: 12px; font-weight: 600; cursor: pointer;
+            border: none; padding: 8px 14px; border-radius: 6px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
             transition: all .15s; white-space: nowrap;
-            display: inline-flex; align-items: center; gap: 5px;
+            display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
         }
         .btn-primary { background: var(--primary); color: #fff; }
         .btn-primary:hover { background: var(--primary-dark); }
@@ -145,29 +162,29 @@
         .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
         .btn-ghost:hover { background: #f8fafc; color: var(--text); }
         .btn:disabled { opacity: .45; cursor: not-allowed; }
-        .btn-scan { padding: 9px 22px; font-size: 13px; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-scan { padding: 10px 20px; font-size: 13px; width: 100%; }
 
         /* ---- Table Card ---- */
         .table-card {
             background: var(--card); border-radius: var(--radius);
-            box-shadow: var(--shadow); margin-bottom: 18px;
+            box-shadow: var(--shadow); margin-bottom: 12px;
         }
         .table-toolbar {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 14px 18px; border-bottom: 1px solid var(--border);
-            gap: 12px; flex-wrap: wrap;
+            display: flex; flex-direction: column; gap: 8px;
+            padding: 12px 14px; border-bottom: 1px solid var(--border);
         }
-        .toolbar-left { display: flex; align-items: center; gap: 12px; }
-        .toolbar-left h2 { font-size: 15px; font-weight: 700; white-space: nowrap; }
-        .toolbar-right { display: flex; align-items: center; gap: 8px; }
+        .toolbar-top { display: flex; justify-content: space-between; align-items: center; }
+        .toolbar-top h2 { font-size: 15px; font-weight: 700; white-space: nowrap; }
+        .toolbar-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
         .bulk-bar { display: flex; align-items: center; gap: 6px; }
         .bulk-count { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 
         /* Search input */
         .search-box {
-            padding: 6px 12px 6px 32px;
+            padding: 8px 12px 8px 34px;
             border: 1px solid var(--border); border-radius: 6px;
-            font-size: 12px; width: 220px;
+            font-size: 14px; width: 100%;
             background: #f8fafc url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") 10px center no-repeat;
             transition: border-color .15s;
         }
@@ -175,16 +192,41 @@
 
         /* View toggle */
         .view-toggle {
-            padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px;
+            padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px;
             font-size: 10px; font-weight: 700; cursor: pointer;
             background: #fff; color: var(--text-muted);
             text-transform: uppercase; letter-spacing: .4px;
+            white-space: nowrap; flex-shrink: 0;
         }
         .view-toggle:hover { background: #f8fafc; }
         .view-toggle.expanded { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-        /* Table */
-        .table-wrap { overflow-x: auto; }
+        /* ---- Mobile Card Layout (for tables on small screens) ---- */
+        .email-cards { display: flex; flex-direction: column; gap: 1px; background: #f1f5f9; }
+        .email-card {
+            background: var(--card); padding: 12px 14px;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .email-card:active { background: #f8fafc; }
+        .card-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .card-subject {
+            font-weight: 600; font-size: 13px; color: var(--primary);
+            cursor: pointer; word-break: break-word; flex: 1;
+        }
+        .card-meta {
+            font-size: 11px; color: var(--text-muted);
+            display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center;
+        }
+        .card-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+        .card-tag {
+            font-size: 10px; font-weight: 600; padding: 2px 8px;
+            border-radius: 4px; background: #f1f5f9; color: var(--text-muted);
+        }
+        .card-actions { display: flex; gap: 6px; }
+        .card-check { display: flex; align-items: center; padding-right: 8px; }
+
+        /* Table (desktop) */
+        .table-wrap { overflow-x: auto; display: none; }
         table {
             width: 100%; border-collapse: collapse;
             font-size: 12px; table-layout: auto;
@@ -202,10 +244,7 @@
         tbody tr:last-child { border-bottom: none; }
         tbody tr:hover { background: #f8fafc; }
         tbody td { padding: 10px 12px; vertical-align: top; }
-
-        /* Row number */
         td.col-num { color: var(--text-light); font-size: 11px; font-weight: 500; text-align: center; width: 30px; }
-
         td.col-subject { max-width: 360px; }
         td.col-sender { max-width: 180px; }
         td.col-subject, td.col-sender {
@@ -217,20 +256,16 @@
             word-wrap: break-word; overflow-wrap: break-word;
         }
         td.col-actions { white-space: nowrap; }
-
         .subject-link { cursor: pointer; color: var(--primary); font-weight: 500; }
         .subject-link:hover { text-decoration: underline; }
-
         .inline-select {
             padding: 4px 6px; border: 1px solid var(--border); border-radius: 5px;
             font-size: 11px; background: #fff; cursor: pointer; max-width: 100px;
         }
         .inline-select:focus { border-color: var(--primary); outline: none; }
-
         .row-actions { display: flex; gap: 4px; }
-        input[type="checkbox"] { cursor: pointer; width: 15px; height: 15px; accent-color: var(--primary); }
-
-        .empty-state { padding: 48px 20px; text-align: center; color: var(--text-light); font-size: 14px; }
+        input[type="checkbox"] { cursor: pointer; width: 18px; height: 18px; accent-color: var(--primary); }
+        .empty-state { padding: 40px 16px; text-align: center; color: var(--text-light); font-size: 14px; }
 
         /* Sender badges */
         .sender-known, .sender-unknown {
@@ -239,12 +274,11 @@
         }
         .sender-known { background: #dcfce7; color: #166534; }
         .sender-unknown { background: #fef3c7; color: #92400e; }
-        .sender-company { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-
+        .sender-company { display: block; font-size: 11px; color: var(--text-muted); margin-top: 1px; }
         .resp-yes { color: var(--danger); font-weight: 600; }
         .resp-no { color: var(--text-light); }
 
-        /* Attachments in table */
+        /* Attachments */
         .att-list { display: flex; flex-direction: column; gap: 2px; }
         .att-list a {
             font-size: 11px; color: var(--primary); text-decoration: none;
@@ -269,18 +303,18 @@
         .inactive-badge { color: var(--text-light); font-weight: 600; }
 
         /* ---- Stats Cards ---- */
-        .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+        .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
         .stat-card {
             background: var(--card); border-radius: var(--radius);
-            padding: 18px 22px; box-shadow: var(--shadow);
+            padding: 14px 16px; box-shadow: var(--shadow);
         }
-        .stat-card .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
-        .stat-card .value { font-size: 30px; font-weight: 800; color: var(--text); }
+        .stat-card .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
+        .stat-card .value { font-size: 24px; font-weight: 800; color: var(--text); }
 
         /* ---- Log Panel ---- */
-        .log-panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 18px; }
+        .log-panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 12px; }
         .log-header {
-            padding: 14px 18px; border-bottom: 1px solid var(--border);
+            padding: 12px 14px; border-bottom: 1px solid var(--border);
             cursor: pointer; display: flex; justify-content: space-between;
             align-items: center; user-select: none;
         }
@@ -288,39 +322,43 @@
         .log-header .toggle { font-size: 16px; color: var(--text-light); }
         .log-body {
             display: none; max-height: 260px; overflow-y: auto;
-            padding: 12px 18px; background: #0f172a; border-radius: 0 0 var(--radius) var(--radius);
+            padding: 12px; background: #0f172a; border-radius: 0 0 var(--radius) var(--radius);
         }
         .log-body.open { display: block; }
         .log-line {
-            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-family: 'Consolas', 'Courier New', monospace;
             font-size: 11px; color: #94a3b8; line-height: 1.7;
             white-space: pre-wrap; word-break: break-all;
         }
 
         /* ---- Forms ---- */
         .add-form {
-            display: flex; gap: 10px; align-items: flex-end;
-            padding: 14px 18px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+            display: flex; flex-direction: column; gap: 10px;
+            padding: 12px 14px; border-bottom: 1px solid var(--border);
         }
-        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 120px; }
         .form-group label { font-size: 10px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }
         .form-group input {
-            padding: 7px 12px; border: 1px solid var(--border);
-            border-radius: 6px; font-size: 13px; transition: border-color .15s;
+            padding: 8px 12px; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 14px; transition: border-color .15s;
+            width: 100%;
         }
         .form-group input:focus { border-color: var(--primary); outline: none; }
 
         /* ---- Toast ---- */
-        .toast-container { position: fixed; top: 16px; right: 16px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; }
+        .toast-container { position: fixed; top: 58px; right: 12px; left: 12px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
         .toast {
-            padding: 12px 20px; border-radius: 8px; color: #fff;
+            padding: 12px 16px; border-radius: 8px; color: #fff;
             font-size: 13px; font-weight: 500;
-            box-shadow: var(--shadow-lg); animation: slideIn .25s ease; max-width: 380px;
+            box-shadow: var(--shadow-lg); animation: slideIn .25s ease;
+            pointer-events: auto; margin-left: auto;
+            max-width: 380px;
         }
         .toast-success { background: var(--success); }
         .toast-error { background: var(--danger); }
         .toast-info { background: var(--primary); }
-        @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+        @keyframes slideIn { from{transform:translateY(-20px);opacity:0} to{transform:translateY(0);opacity:1} }
 
         /* ---- Detail Modal ---- */
         .modal-overlay {
@@ -329,55 +367,57 @@
             background: rgba(15,23,42,0.6); backdrop-filter: blur(4px);
             z-index: 2000;
             justify-content: center; align-items: flex-start;
-            padding: 48px 20px; overflow-y: auto;
+            padding: 0; overflow-y: auto;
         }
         .modal-overlay.open { display: flex; }
         .modal {
-            background: var(--card); border-radius: 14px;
-            width: 100%; max-width: 780px;
-            box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+            background: var(--card);
+            width: 100%; min-height: 100vh;
         }
         .modal-header {
             display: flex; justify-content: space-between; align-items: center;
-            padding: 18px 24px; border-bottom: 1px solid var(--border);
+            padding: 14px 16px; border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--card); z-index: 1;
         }
-        .modal-header h2 { font-size: 16px; font-weight: 700; flex: 1; margin-right: 12px; word-break: break-word; }
+        .modal-header h2 { font-size: 14px; font-weight: 700; flex: 1; margin-right: 8px; word-break: break-word; }
         .modal-close {
-            background: none; border: none; font-size: 20px; cursor: pointer;
-            color: var(--text-light); width: 32px; height: 32px; border-radius: 6px;
+            background: none; border: none; font-size: 24px; cursor: pointer;
+            color: var(--text-light); width: 36px; height: 36px; border-radius: 6px;
             display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
         }
         .modal-close:hover { background: #f1f5f9; color: var(--text); }
-        .modal-body { padding: 24px; max-height: 68vh; overflow-y: auto; }
-        .modal-field { margin-bottom: 16px; }
+        .modal-body { padding: 16px; }
+        .modal-field { margin-bottom: 14px; }
         .modal-field-label { font-size: 10px; font-weight: 700; color: var(--text-light); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
-        .modal-field-value { font-size: 13px; color: var(--text); }
+        .modal-field-value { font-size: 13px; color: var(--text); word-break: break-word; }
         .modal-body-text {
             background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
-            padding: 14px; max-height: 320px; overflow-y: auto;
+            padding: 12px; max-height: 320px; overflow-y: auto;
             white-space: pre-wrap; word-wrap: break-word;
-            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-family: 'Consolas', 'Courier New', monospace;
             font-size: 12px; line-height: 1.6; color: #334155;
         }
-        .modal-fields-row { display: flex; gap: 16px; margin-bottom: 16px; }
-        .modal-fields-row .modal-field { flex: 1; margin-bottom: 0; }
+        .modal-fields-row { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+        .modal-fields-row .modal-field { margin-bottom: 0; }
         .modal-att-list { display: flex; flex-direction: column; gap: 6px; }
-        .modal-att-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-        .modal-att-item a { color: var(--primary); text-decoration: none; font-weight: 500; }
+        .modal-att-item { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+        .modal-att-item a { color: var(--primary); text-decoration: none; font-weight: 500; word-break: break-all; }
         .modal-att-item a:hover { text-decoration: underline; }
         .modal-att-item.signature a { color: var(--text-light); text-decoration: line-through; }
         .modal-footer {
-            display: flex; justify-content: flex-end; gap: 8px;
-            padding: 16px 24px; border-top: 1px solid var(--border);
+            display: flex; gap: 8px;
+            padding: 14px 16px; border-top: 1px solid var(--border);
+            position: sticky; bottom: 0; background: var(--card);
         }
-        .modal-footer .btn { padding: 9px 22px; font-size: 13px; }
+        .modal-footer .btn { padding: 10px 20px; font-size: 14px; flex: 1; }
         .modal-select {
-            padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
-            font-size: 12px; background: #fff; cursor: pointer; width: 100%;
+            padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+            font-size: 13px; background: #fff; cursor: pointer; width: 100%;
         }
         .modal-select:focus { border-color: var(--primary); outline: none; }
         .body-toggle {
-            display: inline-block; margin-top: 8px; font-size: 11px;
+            display: inline-block; margin-top: 8px; font-size: 12px;
             color: var(--primary); cursor: pointer; font-weight: 600;
         }
         .body-toggle:hover { text-decoration: underline; }
@@ -385,28 +425,80 @@
         /* ---- Pagination ---- */
         .table-footer {
             display: flex; justify-content: space-between; align-items: center;
-            padding: 10px 18px; border-top: 1px solid var(--border);
+            padding: 10px 14px; border-top: 1px solid var(--border);
             font-size: 12px; color: var(--text-muted);
+            flex-wrap: wrap; gap: 8px;
         }
-        .pagination { display: flex; gap: 4px; }
+        .pagination { display: flex; gap: 4px; flex-wrap: wrap; }
         .page-btn {
-            padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px;
+            padding: 6px 10px; border: 1px solid var(--border); border-radius: 5px;
             background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-muted);
+            min-width: 32px; text-align: center;
         }
         .page-btn:hover { background: #f8fafc; color: var(--text); }
         .page-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
         .page-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-        /* ---- Responsive ---- */
-        @media (max-width: 1024px) {
-            .control-bar { flex-direction: column; }
-            .stats-row { grid-template-columns: 1fr; }
-            .container { padding: 16px 12px; }
+        /* ==== DESKTOP (768px+) ==== */
+        @media (min-width: 768px) {
+            body { font-size: 13px; }
+            header { padding: 0 24px; height: 56px; }
+            header h1 { font-size: 16px; }
+            .tab-bar { padding: 0 24px; gap: 4px; }
+            .tab-btn { padding: 14px 18px; }
+            .container { padding: 20px 24px; }
+
+            .control-bar { flex-direction: row; gap: 14px; }
+            .control-card { padding: 16px 20px; }
+            .control-card.scanner { flex: 1; flex-direction: row; align-items: center; gap: 20px; }
+            .ctrl-items { grid-template-columns: repeat(4, auto); gap: 24px; flex: 1; }
+            .scanner-actions { justify-content: flex-start; }
+            .btn-scan { width: auto; padding: 9px 22px; }
+            .control-card.classifier { min-width: 260px; }
+
+            .table-toolbar { flex-direction: row; justify-content: space-between; align-items: center; padding: 14px 18px; }
+            .toolbar-controls { flex-wrap: nowrap; }
+            .search-box { width: 220px; }
+
+            /* Show table, hide cards on desktop */
+            .table-wrap { display: block !important; }
+            .email-cards { display: none !important; }
+
+            /* Modal */
+            .modal-overlay { padding: 40px 20px; }
+            .modal { border-radius: 14px; max-width: 780px; min-height: auto; box-shadow: 0 25px 60px rgba(0,0,0,0.25); }
+            .modal-header { position: static; padding: 18px 24px; }
+            .modal-header h2 { font-size: 16px; }
+            .modal-body { padding: 24px; max-height: 68vh; overflow-y: auto; }
+            .modal-footer { position: static; padding: 16px 24px; }
+            .modal-footer .btn { flex: none; }
+            .modal-fields-row { flex-direction: row; gap: 16px; }
+
+            /* Forms */
+            .add-form { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
+            .form-group { min-width: 0; flex: none; }
+
+            /* Stats */
+            .stat-card .value { font-size: 30px; }
+
+            /* Toast */
+            .toast-container { left: auto; right: 16px; top: 16px; }
         }
-        @media (max-width: 768px) {
-            .modal { max-width: 100%; }
-            .modal-fields-row { flex-direction: column; }
-            .search-box { width: 100%; }
+
+        /* ==== LARGE DESKTOP (1024px+) ==== */
+        @media (min-width: 1024px) {
+            .container { padding: 20px 28px; }
+        }
+
+        /* ==== SMALL MOBILE (< 400px) ==== */
+        @media (max-width: 400px) {
+            header h1 { font-size: 13px; }
+            .status-pill { font-size: 10px; padding: 3px 8px; }
+            .tab-btn { padding: 10px 10px; font-size: 12px; }
+            .stats-row { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+            .stat-card { padding: 10px 12px; }
+            .stat-card .value { font-size: 20px; }
+            .btn-sm { padding: 4px 8px; font-size: 11px; }
         }
     </style>
 </head>
@@ -423,10 +515,10 @@
 
     <div class="tab-bar">
         <button class="tab-btn active" data-tab="review" onclick="switchTab('review')">
-            Review Queue <span class="tab-badge zero" id="pendingBadge">0</span>
+            Review <span class="tab-badge zero" id="pendingBadge">0</span>
         </button>
         <button class="tab-btn" data-tab="processed" onclick="switchTab('processed')">Processed</button>
-        <button class="tab-btn" data-tab="departments" onclick="switchTab('departments')">Departments</button>
+        <button class="tab-btn" data-tab="departments" onclick="switchTab('departments')">Depts</button>
         <button class="tab-btn" data-tab="contacts" onclick="switchTab('contacts')">Contacts</button>
     </div>
 
@@ -459,7 +551,9 @@
                         <div class="ctrl-item"><span class="ctrl-label">Result</span><span class="ctrl-value" id="scanResult">--</span></div>
                         <div class="ctrl-item"><span class="ctrl-label">Next Scan</span><span class="ctrl-value" id="scanNext">--</span></div>
                     </div>
-                    <button class="btn btn-primary btn-scan" id="btnScan" onclick="triggerScan()">Scan Now</button>
+                    <div class="scanner-actions">
+                        <button class="btn btn-primary btn-scan" id="btnScan" onclick="triggerScan()">Scan Now</button>
+                    </div>
                 </div>
                 <div class="control-card classifier">
                     <div class="ctrl-label">Classifier Engine</div>
@@ -472,18 +566,18 @@
 
             <div class="table-card">
                 <div class="table-toolbar">
-                    <div class="toolbar-left">
+                    <div class="toolbar-top">
                         <h2>Pending Review</h2>
-                        <button class="view-toggle" id="pendingViewToggle" onclick="toggleView('pending')">Expanded</button>
-                    </div>
-                    <div class="toolbar-right">
-                        <div class="bulk-bar" id="bulkActions" style="display:none">
-                            <span class="bulk-count" id="bulkCount">0</span>
-                            <button class="btn btn-success" onclick="bulkApprove()">Approve</button>
-                            <button class="btn btn-danger" onclick="bulkReject()">Reject</button>
+                        <div class="toolbar-controls">
+                            <div class="bulk-bar" id="bulkActions" style="display:none">
+                                <span class="bulk-count" id="bulkCount">0</span>
+                                <button class="btn btn-success btn-sm" onclick="bulkApprove()">Approve</button>
+                                <button class="btn btn-danger btn-sm" onclick="bulkReject()">Reject</button>
+                            </div>
+                            <button class="view-toggle desktop-only" id="pendingViewToggle" onclick="toggleView('pending')">Expanded</button>
                         </div>
-                        <input class="search-box" id="pendingSearch" type="text" placeholder="Filter emails..." oninput="filterPending()">
                     </div>
+                    <input class="search-box" id="pendingSearch" type="text" placeholder="Filter emails..." oninput="filterPending()">
                 </div>
                 <div id="pendingTableWrap">
                     <div class="empty-state">No emails pending review. Click "Scan Now" to check.</div>
@@ -496,19 +590,19 @@
     <div class="tab-panel" id="tab-processed">
         <div class="container">
             <div class="stats-row">
-                <div class="stat-card"><div class="label">Total Processed</div><div class="value" id="statTotal">--</div></div>
-                <div class="stat-card"><div class="label">Processed Today</div><div class="value" id="statToday">--</div></div>
-                <div class="stat-card"><div class="label">With Attachments</div><div class="value" id="statAttach">--</div></div>
+                <div class="stat-card"><div class="label">Total</div><div class="value" id="statTotal">--</div></div>
+                <div class="stat-card"><div class="label">Today</div><div class="value" id="statToday">--</div></div>
+                <div class="stat-card"><div class="label">With Att.</div><div class="value" id="statAttach">--</div></div>
             </div>
             <div class="table-card">
                 <div class="table-toolbar">
-                    <div class="toolbar-left">
+                    <div class="toolbar-top">
                         <h2>Recent Processed</h2>
-                        <button class="view-toggle" id="processedViewToggle" onclick="toggleView('processed')">Expanded</button>
+                        <div class="toolbar-controls">
+                            <button class="view-toggle desktop-only" id="processedViewToggle" onclick="toggleView('processed')">Expanded</button>
+                        </div>
                     </div>
-                    <div class="toolbar-right">
-                        <input class="search-box" id="processedSearch" type="text" placeholder="Filter processed..." oninput="filterProcessed()">
-                    </div>
+                    <input class="search-box" id="processedSearch" type="text" placeholder="Filter processed..." oninput="filterProcessed()">
                 </div>
                 <div id="emailTableWrap"><div class="empty-state">No emails processed yet.</div></div>
             </div>
@@ -525,11 +619,13 @@
     <div class="tab-panel" id="tab-departments">
         <div class="container">
             <div class="table-card">
-                <div class="table-toolbar"><div class="toolbar-left"><h2>Departments</h2></div></div>
+                <div class="table-toolbar"><div class="toolbar-top"><h2>Departments</h2></div></div>
                 <div class="add-form">
-                    <div class="form-group"><label>Name</label><input type="text" id="deptName" placeholder="e.g. MEP" style="width:140px"></div>
-                    <div class="form-group"><label>Keywords (comma-separated)</label><input type="text" id="deptKeywords" placeholder="e.g. mechanical, plumbing" style="width:340px"></div>
-                    <button class="btn btn-primary" onclick="addDepartment()">Add</button>
+                    <div class="form-row">
+                        <div class="form-group" style="max-width:180px"><label>Name</label><input type="text" id="deptName" placeholder="e.g. MEP"></div>
+                        <div class="form-group"><label>Keywords (comma-separated)</label><input type="text" id="deptKeywords" placeholder="e.g. mechanical, plumbing"></div>
+                    </div>
+                    <button class="btn btn-primary" onclick="addDepartment()" style="align-self:flex-end">Add Department</button>
                 </div>
                 <div id="deptTableWrap"><div class="empty-state">No departments configured.</div></div>
             </div>
@@ -540,14 +636,18 @@
     <div class="tab-panel" id="tab-contacts">
         <div class="container">
             <div class="table-card">
-                <div class="table-toolbar"><div class="toolbar-left"><h2>Expected Senders</h2></div></div>
+                <div class="table-toolbar"><div class="toolbar-top"><h2>Expected Senders</h2></div></div>
                 <div class="add-form">
-                    <div class="form-group"><label>Name</label><input type="text" id="contactName" placeholder="e.g. John Smith" style="width:150px"></div>
-                    <div class="form-group"><label>Email</label><input type="text" id="contactEmail" placeholder="e.g. john@co.com" style="width:200px"></div>
-                    <div class="form-group"><label>Company</label><input type="text" id="contactCompany" placeholder="e.g. AECOM" style="width:140px"></div>
-                    <div class="form-group"><label>Dept.</label><input type="text" id="contactDept" placeholder="e.g. Eng." style="width:120px"></div>
-                    <div class="form-group"><label>Notes</label><input type="text" id="contactNotes" placeholder="Optional" style="width:140px"></div>
-                    <button class="btn btn-primary" onclick="addContact()">Add</button>
+                    <div class="form-row">
+                        <div class="form-group"><label>Name</label><input type="text" id="contactName" placeholder="e.g. John Smith"></div>
+                        <div class="form-group"><label>Email</label><input type="text" id="contactEmail" placeholder="e.g. john@co.com"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Company</label><input type="text" id="contactCompany" placeholder="e.g. AECOM"></div>
+                        <div class="form-group"><label>Dept.</label><input type="text" id="contactDept" placeholder="e.g. Eng."></div>
+                        <div class="form-group"><label>Notes</label><input type="text" id="contactNotes" placeholder="Optional"></div>
+                    </div>
+                    <button class="btn btn-primary" onclick="addContact()" style="align-self:flex-end">Add Contact</button>
                 </div>
                 <div id="contactTableWrap"><div class="empty-state">No contacts added yet.</div></div>
             </div>
@@ -565,6 +665,8 @@ var currentModalId = null;
 var modalBodyFull = '', modalBodySummary = '', showingFullBody = false;
 var pendingPage = 0, processedPage = 0;
 var PAGE_SIZE = 15;
+var isMobile = window.innerWidth < 768;
+window.addEventListener('resize', function(){ isMobile = window.innerWidth < 768; });
 
 // ---- Helpers ----
 function esc(s) { if(!s) return ''; var el=document.createElement('span'); el.textContent=s; return el.innerHTML; }
@@ -597,20 +699,26 @@ function fmtFileSize(b) {
     if(b<1048576) return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB';
 }
 
-// ---- Pagination helper ----
+// ---- Pagination ----
 function paginate(items, page) {
     var start = page * PAGE_SIZE;
     return { items: items.slice(start, start + PAGE_SIZE), total: items.length, page: page, pages: Math.ceil(items.length / PAGE_SIZE) };
 }
-function renderPagination(containerId, totalItems, currentPage, onPageFn) {
+function renderPagination(totalItems, currentPage, onPageFn) {
     var pages = Math.ceil(totalItems / PAGE_SIZE);
     if (pages <= 1) return '';
-    var html = '<div class="table-footer"><span>Showing ' + (currentPage*PAGE_SIZE+1) + '-' + Math.min((currentPage+1)*PAGE_SIZE, totalItems) + ' of ' + totalItems + '</span><div class="pagination">';
-    html += '<button class="page-btn" onclick="'+onPageFn+'('+(currentPage-1)+')"' + (currentPage===0?' disabled':'') + '>&laquo;</button>';
-    for (var i=0; i<pages; i++) {
-        html += '<button class="page-btn'+(i===currentPage?' active':'')+'" onclick="'+onPageFn+'('+i+')">'+( i+1)+'</button>';
+    var from = currentPage*PAGE_SIZE+1, to = Math.min((currentPage+1)*PAGE_SIZE, totalItems);
+    var html = '<div class="table-footer"><span>'+from+'-'+to+' of '+totalItems+'</span><div class="pagination">';
+    html += '<button class="page-btn" onclick="'+onPageFn+'('+(currentPage-1)+')"'+(currentPage===0?' disabled':'')+'>&laquo;</button>';
+    // Show max 5 page buttons on mobile
+    var maxBtns = isMobile ? 5 : pages;
+    var startP = Math.max(0, currentPage - Math.floor(maxBtns/2));
+    var endP = Math.min(pages, startP + maxBtns);
+    if(endP - startP < maxBtns) startP = Math.max(0, endP - maxBtns);
+    for (var i=startP; i<endP; i++) {
+        html += '<button class="page-btn'+(i===currentPage?' active':'')+'" onclick="'+onPageFn+'('+i+')">'+(i+1)+'</button>';
     }
-    html += '<button class="page-btn" onclick="'+onPageFn+'('+(currentPage+1)+')"' + (currentPage>=pages-1?' disabled':'') + '>&raquo;</button>';
+    html += '<button class="page-btn" onclick="'+onPageFn+'('+(currentPage+1)+')"'+(currentPage>=pages-1?' disabled':'')+'>&raquo;</button>';
     html += '</div></div>';
     return html;
 }
@@ -700,8 +808,41 @@ function renderPendingTable() {
         document.getElementById('bulkActions').style.display='none'; return;
     }
     var pg=paginate(filtered, pendingPage);
+    var html = '';
+
+    // Mobile card layout
+    html += '<div class="email-cards">';
+    for(var i=0;i<pg.items.length;i++){
+        var e=pg.items[i];
+        var checked=selectedIds.has(e.id)?' checked':'';
+        var senderBadge=e.sender_known?'<span class="sender-known">Known</span>':'<span class="sender-unknown">New</span>';
+        html+='<div class="email-card">';
+        html+='<div class="card-row">';
+        html+='<div class="card-check"><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></div>';
+        html+='<div style="flex:1;min-width:0">';
+        html+='<div class="card-subject" onclick="openDetailModal('+e.id+')">'+esc(e.subject||'(no subject)')+'</div>';
+        html+='<div class="card-meta">';
+        html+='<span>'+esc(e.sender_name||e.sender)+senderBadge+'</span>';
+        html+='<span>'+fmtTime(e.scanned_at)+'</span>';
+        if(e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
+        html+='</div>';
+        html+='</div></div>';
+        html+='<div class="card-row">';
+        html+='<div class="card-tags">';
+        if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
+        if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
+        if(e.department) html+='<span class="card-tag">'+esc(e.department)+'</span>';
+        html+='</div>';
+        html+='<div class="card-actions">';
+        html+='<button class="btn btn-success btn-sm" onclick="approveOne('+e.id+')">Approve</button>';
+        html+='<button class="btn btn-danger btn-sm" onclick="rejectOne('+e.id+')">Reject</button>';
+        html+='</div></div></div>';
+    }
+    html += '</div>';
+
+    // Desktop table layout
     var exp=viewModes.pending==='expanded'?' table-expanded':'';
-    var html='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
+    html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
         '<th style="width:30px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>'+
         '<th style="width:30px">#</th><th>Date</th><th>From</th><th>Subject</th><th>Att.</th>'+
         '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Actions</th>'+
@@ -722,15 +863,15 @@ function renderPendingTable() {
             '<td><select class="inline-select" data-id="'+e.id+'" data-field="discipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></td>'+
             '<td><select class="inline-select" data-id="'+e.id+'" data-field="department"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></td>'+
             '<td class="col-actions"><div class="row-actions">'+
-                '<button class="btn btn-success" onclick="approveOne('+e.id+')">Approve</button>'+
-                '<button class="btn btn-danger" onclick="rejectOne('+e.id+')">Reject</button>'+
+                '<button class="btn btn-success btn-sm" onclick="approveOne('+e.id+')">Approve</button>'+
+                '<button class="btn btn-danger btn-sm" onclick="rejectOne('+e.id+')">Reject</button>'+
             '</div></td></tr>';
     }
     html+='</tbody></table></div>';
-    html+=renderPagination('pendingPag',filtered.length,pendingPage,'setPendingPage');
+    html+=renderPagination(filtered.length,pendingPage,'setPendingPage');
     wrap.innerHTML=html;
     updateBulkBar();
-    // Fetch attachments
+    // Fetch attachment details for desktop view
     pg.items.forEach(function(e){
         if(e.attachment_count>0){
             fetch('/api/pending/'+e.id+'/attachments').then(function(r){return r.json();}).then(function(data){
@@ -746,7 +887,8 @@ function renderPendingTable() {
     });
 }
 function toggleSelectAll(){
-    var ch=document.getElementById('selectAll').checked;
+    var ch=document.getElementById('selectAll');
+    if(!ch)return; ch=ch.checked;
     document.querySelectorAll('#pendingTableWrap input[type="checkbox"][data-id]').forEach(function(cb){
         cb.checked=ch; var id=parseInt(cb.dataset.id); if(ch)selectedIds.add(id);else selectedIds.delete(id);
     }); updateBulkBar();
@@ -804,6 +946,7 @@ function openDetailModal(id){
     document.getElementById('modalSubject').textContent='Loading...';
     document.getElementById('modalBody').innerHTML='<div class="empty-state">Loading...</div>';
     document.getElementById('detailModal').classList.add('open');
+    document.body.style.overflow='hidden';
     fetch('/api/pending/'+id+'/detail').then(function(r){return r.json();}).then(function(e){
         if(e.error){document.getElementById('modalBody').innerHTML='<div class="empty-state">'+esc(e.error)+'</div>';return;}
         document.getElementById('modalSubject').textContent=e.subject||'(no subject)';
@@ -846,7 +989,7 @@ function openDetailModal(id){
         document.getElementById('modalBody').innerHTML=h;
     }).catch(function(){document.getElementById('modalBody').innerHTML='<div class="empty-state">Failed to load.</div>';});
 }
-function closeDetailModal(){document.getElementById('detailModal').classList.remove('open');currentModalId=null;}
+function closeDetailModal(){document.getElementById('detailModal').classList.remove('open');document.body.style.overflow='';currentModalId=null;}
 function closeModalOverlay(ev){if(ev.target===document.getElementById('detailModal'))closeDetailModal();}
 function toggleFullBody(){
     var t=document.getElementById('modalBodyText'),b=document.getElementById('bodyToggle');
@@ -895,8 +1038,33 @@ function renderProcessedTable(){
     var filtered=getFilteredProcessed();
     if(!filtered.length){wrap.innerHTML='<div class="empty-state">'+(processedEmails.length?'No matches.':'No emails processed yet.')+'</div>';return;}
     var pg=paginate(filtered,processedPage);
+    var html='';
+
+    // Mobile cards
+    html += '<div class="email-cards">';
+    for(var i=0;i<pg.items.length;i++){
+        var e=pg.items[i];
+        html+='<div class="email-card">';
+        html+='<div class="card-row"><div style="flex:1;min-width:0">';
+        html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+'</div>';
+        html+='<div class="card-subject" style="color:var(--text);cursor:default">'+esc(e.subject||'(no subject)')+'</div>';
+        html+='<div class="card-meta">';
+        html+='<span>'+esc(e.sender_name||e.sender)+'</span>';
+        html+='<span>'+fmtTime(e.processed_at)+'</span>';
+        if(e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
+        if(e.response_required) html+='<span class="resp-yes">Response needed</span>';
+        html+='</div></div></div>';
+        html+='<div class="card-tags">';
+        if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
+        if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
+        if(e.department) html+='<span class="card-tag">'+esc(e.department)+'</span>';
+        html+='</div></div>';
+    }
+    html += '</div>';
+
+    // Desktop table
     var exp=viewModes.processed==='expanded'?' table-expanded':'';
-    var html='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
+    html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
         '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>Subject</th>'+
         '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
     for(var i=0;i<pg.items.length;i++){
@@ -913,7 +1081,7 @@ function renderProcessedTable(){
             '<td><span class="'+rc+'">'+rt+'</span></td><td>'+(e.attachment_count||0)+'</td></tr>';
     }
     html+='</tbody></table></div>';
-    html+=renderPagination('procPag',filtered.length,processedPage,'setProcessedPage');
+    html+=renderPagination(filtered.length,processedPage,'setProcessedPage');
     wrap.innerHTML=html;
 }
 
@@ -922,13 +1090,75 @@ function toggleLog(){var b=document.getElementById('logBody'),t=document.getElem
 function fetchLog(){fetch('/api/log').then(function(r){return r.json();}).then(function(d){var b=document.getElementById('logBody');if(!d.lines||!d.lines.length){b.innerHTML='<div class="log-line">No log entries.</div>';return;}b.innerHTML=d.lines.map(function(l){return '<div class="log-line">'+esc(l)+'</div>';}).join('');b.scrollTop=b.scrollHeight;}).catch(function(){});}
 
 // ---- Departments ----
-function fetchDepartments(){fetch('/api/departments').then(function(r){return r.json();}).then(function(d){var depts=d.departments||[],w=document.getElementById('deptTableWrap');if(!depts.length){w.innerHTML='<div class="empty-state">No departments configured.</div>';return;}var h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Keywords</th><th>Status</th><th>Actions</th></tr></thead><tbody>';for(var i=0;i<depts.length;i++){var dp=depts[i],kws=[];try{kws=JSON.parse(dp.keywords||'[]');}catch(e){}var kt=kws.map(function(k){return '<span class="tag">'+esc(k)+'</span>';}).join(' ');var sc=dp.is_active?'active-badge':'inactive-badge',st=dp.is_active?'Active':'Inactive',tt=dp.is_active?'Deactivate':'Activate';h+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(dp.name)+'</strong></td><td>'+(kt||'<span style="color:var(--text-light)">none</span>')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost" onclick="toggleDept('+dp.id+','+(dp.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger" onclick="deleteDept('+dp.id+',\''+esc(dp.name)+'\')">Delete</button></div></td></tr>';}h+='</tbody></table></div>';w.innerHTML=h;}).catch(function(){});}
+function fetchDepartments(){
+    fetch('/api/departments').then(function(r){return r.json();}).then(function(d){
+        var depts=d.departments||[],w=document.getElementById('deptTableWrap');
+        if(!depts.length){w.innerHTML='<div class="empty-state">No departments configured.</div>';return;}
+        var html='';
+        // Mobile cards
+        html+='<div class="email-cards">';
+        for(var i=0;i<depts.length;i++){
+            var dp=depts[i],kws=[];try{kws=JSON.parse(dp.keywords||'[]');}catch(e){}
+            var sc=dp.is_active?'active-badge':'inactive-badge',st=dp.is_active?'Active':'Inactive',tt=dp.is_active?'Deactivate':'Activate';
+            html+='<div class="email-card">';
+            html+='<div class="card-row"><div style="flex:1"><strong>'+esc(dp.name)+'</strong> <span class="'+sc+'">'+st+'</span></div></div>';
+            if(kws.length) html+='<div class="card-tags">'+kws.map(function(k){return '<span class="card-tag">'+esc(k)+'</span>';}).join('')+'</div>';
+            html+='<div class="card-actions">';
+            html+='<button class="btn btn-ghost btn-sm" onclick="toggleDept('+dp.id+','+(dp.is_active?'false':'true')+')">'+tt+'</button>';
+            html+='<button class="btn btn-danger btn-sm" onclick="deleteDept('+dp.id+',\''+esc(dp.name)+'\')">Delete</button>';
+            html+='</div></div>';
+        }
+        html+='</div>';
+        // Desktop table
+        html+='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Keywords</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+        for(var i=0;i<depts.length;i++){
+            var dp=depts[i],kws=[];try{kws=JSON.parse(dp.keywords||'[]');}catch(e){}
+            var kt=kws.map(function(k){return '<span class="tag">'+esc(k)+'</span>';}).join(' ');
+            var sc=dp.is_active?'active-badge':'inactive-badge',st=dp.is_active?'Active':'Inactive',tt=dp.is_active?'Deactivate':'Activate';
+            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(dp.name)+'</strong></td><td>'+(kt||'<span style="color:var(--text-light)">none</span>')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost btn-sm" onclick="toggleDept('+dp.id+','+(dp.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteDept('+dp.id+',\''+esc(dp.name)+'\')">Delete</button></div></td></tr>';
+        }
+        html+='</tbody></table></div>';
+        w.innerHTML=html;
+    }).catch(function(){});
+}
 function addDepartment(){var n=document.getElementById('deptName').value.trim(),k=document.getElementById('deptKeywords').value.trim();if(!n){showToast('Name required','error');return;}var kw=k?k.split(',').map(function(s){return s.trim();}).filter(Boolean):[];fetch('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,keywords:kw})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('deptName').value='';document.getElementById('deptKeywords').value='';fetchDepartments();fetchClassificationOptions();}).catch(function(){showToast('Failed','error');});}
 function toggleDept(id,a){fetch('/api/departments/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active:a})}).then(function(r){return r.json();}).then(function(){fetchDepartments();fetchClassificationOptions();}).catch(function(){});}
 function deleteDept(id,n){if(!confirm('Delete "'+n+'"?'))return;fetch('/api/departments/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){showToast('Deleted','info');fetchDepartments();fetchClassificationOptions();}).catch(function(){});}
 
 // ---- Contacts ----
-function fetchContacts(){fetch('/api/contacts').then(function(r){return r.json();}).then(function(d){var cs=d.contacts||[],w=document.getElementById('contactTableWrap');if(!cs.length){w.innerHTML='<div class="empty-state">No contacts added yet.</div>';return;}var h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Company</th><th>Dept.</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead><tbody>';for(var i=0;i<cs.length;i++){var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';h+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(c.name)+'</strong></td><td>'+esc(c.email)+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.department||'')+'</td><td>'+esc(c.notes||'')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button></div></td></tr>';}h+='</tbody></table></div>';w.innerHTML=h;}).catch(function(){});}
+function fetchContacts(){
+    fetch('/api/contacts').then(function(r){return r.json();}).then(function(d){
+        var cs=d.contacts||[],w=document.getElementById('contactTableWrap');
+        if(!cs.length){w.innerHTML='<div class="empty-state">No contacts added yet.</div>';return;}
+        var html='';
+        // Mobile cards
+        html+='<div class="email-cards">';
+        for(var i=0;i<cs.length;i++){
+            var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';
+            html+='<div class="email-card">';
+            html+='<div class="card-row"><div style="flex:1"><strong>'+esc(c.name)+'</strong> <span class="'+sc+'">'+st+'</span></div></div>';
+            html+='<div class="card-meta">';
+            html+='<span>'+esc(c.email)+'</span>';
+            if(c.company) html+='<span>'+esc(c.company)+'</span>';
+            if(c.department) html+='<span>'+esc(c.department)+'</span>';
+            html+='</div>';
+            if(c.notes) html+='<div style="font-size:11px;color:var(--text-muted)">'+esc(c.notes)+'</div>';
+            html+='<div class="card-actions">';
+            html+='<button class="btn btn-ghost btn-sm" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button>';
+            html+='<button class="btn btn-danger btn-sm" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button>';
+            html+='</div></div>';
+        }
+        html+='</div>';
+        // Desktop table
+        html+='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Company</th><th>Dept.</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+        for(var i=0;i<cs.length;i++){
+            var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';
+            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(c.name)+'</strong></td><td>'+esc(c.email)+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.department||'')+'</td><td>'+esc(c.notes||'')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost btn-sm" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button></div></td></tr>';
+        }
+        html+='</tbody></table></div>';
+        w.innerHTML=html;
+    }).catch(function(){});
+}
 function addContact(){var n=document.getElementById('contactName').value.trim(),e=document.getElementById('contactEmail').value.trim(),co=document.getElementById('contactCompany').value.trim(),dp=document.getElementById('contactDept').value.trim(),nt=document.getElementById('contactNotes').value.trim();if(!n||!e){showToast('Name & email required','error');return;}fetch('/api/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,company:co,department:dp,notes:nt})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('contactName').value='';document.getElementById('contactEmail').value='';document.getElementById('contactCompany').value='';document.getElementById('contactDept').value='';document.getElementById('contactNotes').value='';fetchContacts();}).catch(function(){showToast('Failed','error');});}
 function toggleContact(id,a){fetch('/api/contacts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active:a})}).then(function(r){return r.json();}).then(function(){fetchContacts();}).catch(function(){});}
 function deleteContact(id,n){if(!confirm('Delete "'+n+'"?'))return;fetch('/api/contacts/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){showToast('Deleted','info');fetchContacts();}).catch(function(){});}
