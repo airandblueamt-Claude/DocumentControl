@@ -82,6 +82,12 @@ CREATE TABLE IF NOT EXISTS contacts (
     created_at TIMESTAMP,
     updated_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP
+);
 """
 
 # Columns added after initial schema - handled via migration
@@ -563,6 +569,26 @@ class ProcessingTracker:
             if contact:
                 result[em.lower().strip()] = contact
         return result
+
+    # --- Settings (key/value store) ---
+
+    def get_setting(self, key, default=None):
+        """Get a setting value by key. Returns default if not found."""
+        cur = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        )
+        row = cur.fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key, value):
+        """Set a setting value (upsert)."""
+        self._conn.execute(
+            """INSERT INTO settings (key, value, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+            (key, value, datetime.now().isoformat()),
+        )
+        self._conn.commit()
 
     def close(self):
         self._conn.close()

@@ -214,19 +214,24 @@ def api_status():
     })
 
 
-@app.route('/api/classifier-info')
-def api_classifier_info():
-    """Return which classifier method is active and which AI keys are detected."""
+ALLOWED_CLASSIFIER_METHODS = ['auto', 'rule_based', 'gemini', 'groq', 'claude_api']
+
+
+def _resolve_classifier_method():
+    """Return (method, source) — reads SQLite override first, falls back to YAML."""
+    tracker = _get_tracker()
+    try:
+        override = tracker.get_setting('classifier_method')
+    finally:
+        tracker.close()
+    if override and override in ALLOWED_CLASSIFIER_METHODS:
+        return override, 'dashboard'
     class_cfg = _get_class_cfg()
-    method = class_cfg.get('classifier', {}).get('method', 'rule_based')
+    return class_cfg.get('classifier', {}).get('method', 'rule_based'), 'config'
 
-    keys = {
-        'gemini': bool(os.environ.get('GEMINI_API_KEY')),
-        'groq': bool(os.environ.get('GROQ_API_KEY')),
-        'claude': bool(os.environ.get('ANTHROPIC_API_KEY')),
-    }
 
-    # Determine what's actually running
+def _method_active_label(method, keys):
+    """Build a human-readable label for the active classifier method."""
     if method == 'auto':
         active = []
         if keys['gemini']:
@@ -235,26 +240,90 @@ def api_classifier_info():
             active.append('Groq')
         if keys['claude']:
             active.append('Claude')
-        active.append('Keywords')  # always the final fallback
+        active.append('Keywords')
         if len(active) == 1:
-            active_label = 'Keywords (no AI keys detected)'
-        else:
-            active_label = ' > '.join(active)
+            return 'Keywords (no AI keys detected)'
+        return ' > '.join(active)
     elif method == 'rule_based':
-        active_label = 'Keywords'
+        return 'Keywords'
     elif method == 'claude_api':
-        active_label = 'Claude API' if keys['claude'] else 'Claude API (key missing!)'
+        return 'Claude API' if keys['claude'] else 'Claude API (key missing!)'
     elif method == 'gemini':
-        active_label = 'Gemini' if keys['gemini'] else 'Gemini (key missing!)'
+        return 'Gemini' if keys['gemini'] else 'Gemini (key missing!)'
     elif method == 'groq':
-        active_label = 'Groq' if keys['groq'] else 'Groq (key missing!)'
-    else:
-        active_label = method
+        return 'Groq' if keys['groq'] else 'Groq (key missing!)'
+    return method
+
+
+@app.route('/api/classifier-info')
+def api_classifier_info():
+    """Return which classifier method is active and which AI keys are detected."""
+    method, source = _resolve_classifier_method()
+    keys = {
+        'gemini': bool(os.environ.get('GEMINI_API_KEY')),
+        'groq': bool(os.environ.get('GROQ_API_KEY')),
+        'claude': bool(os.environ.get('ANTHROPIC_API_KEY')),
+    }
+    yaml_default = _get_class_cfg().get('classifier', {}).get('method', 'rule_based')
 
     return jsonify({
         'method': method,
-        'active_label': active_label,
+        'source': source,
+        'yaml_default': yaml_default,
+        'active_label': _method_active_label(method, keys),
         'keys': keys,
+    })
+
+
+@app.route('/api/settings/classifier-method', methods=['GET'])
+def api_get_classifier_method():
+    """Return current classifier method setting."""
+    method, source = _resolve_classifier_method()
+    yaml_default = _get_class_cfg().get('classifier', {}).get('method', 'rule_based')
+    return jsonify({'method': method, 'source': source, 'yaml_default': yaml_default})
+
+
+@app.route('/api/settings/classifier-method', methods=['PUT'])
+def api_set_classifier_method():
+    """Set classifier method override in SQLite."""
+    data = request.get_json(silent=True) or {}
+    method = data.get('method', '').strip()
+    if method not in ALLOWED_CLASSIFIER_METHODS:
+        return jsonify({'error': f'Invalid method. Allowed: {ALLOWED_CLASSIFIER_METHODS}'}), 400
+    tracker = _get_tracker()
+    try:
+        tracker.set_setting('classifier_method', method)
+    finally:
+        tracker.close()
+    keys = {
+        'gemini': bool(os.environ.get('GEMINI_API_KEY')),
+        'groq': bool(os.environ.get('GROQ_API_KEY')),
+        'claude': bool(os.environ.get('ANTHROPIC_API_KEY')),
+    }
+    return jsonify({
+        'message': f'Classifier method set to {method}',
+        'method': method,
+        'source': 'dashboard',
+        'active_label': _method_active_label(method, keys),
+    })
+
+
+@app.route('/api/home-stats')
+def api_home_stats():
+    """Return summary stats for the home page."""
+    tracker = _get_tracker()
+    try:
+        stats = tracker.get_pending_stats()
+        departments = tracker.get_departments(active_only=True)
+        contacts = tracker.get_contacts(active_only=True)
+    finally:
+        tracker.close()
+    total_processed = _count_messages(_get_db_path())
+    return jsonify({
+        'pending_review': stats.get('pending_review', 0),
+        'total_processed': total_processed,
+        'departments': len(departments),
+        'contacts': len(contacts),
     })
 
 

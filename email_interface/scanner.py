@@ -47,9 +47,10 @@ def scan_and_queue(base_dir=None):
     # Seed departments from YAML on first run
     tracker.seed_default_departments(class_cfg.get('discipline_keywords', {}))
 
-    # Create classifier with departments from SQLite
+    # Create classifier with departments from SQLite + optional dashboard override
     departments = tracker.get_departments(active_only=True)
-    classifier = create_classifier(class_cfg, departments=departments)
+    method_override = tracker.get_setting('classifier_method')
+    classifier = create_classifier(class_cfg, departments=departments, method=method_override)
 
     max_messages = email_cfg.get('polling', {}).get('max_messages_per_run', 50)
 

@@ -500,6 +500,58 @@
             .stat-card .value { font-size: 20px; }
             .btn-sm { padding: 4px 8px; font-size: 11px; }
         }
+
+        /* ---- Home Page ---- */
+        .home-hero {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 24px 20px;
+            margin-bottom: 16px; text-align: center;
+        }
+        .home-hero h2 { font-size: 20px; font-weight: 800; margin-bottom: 8px; color: var(--text); }
+        .home-hero p { font-size: 14px; color: var(--text-muted); max-width: 600px; margin: 0 auto; line-height: 1.6; }
+        .home-stats {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+            margin-bottom: 16px;
+        }
+        .home-stat-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 16px; text-align: center;
+        }
+        .home-stat-value { font-size: 28px; font-weight: 800; color: var(--primary); }
+        .home-stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-top: 2px; }
+        .home-steps { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; }
+        .home-steps h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+        .steps-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        .step-card {
+            display: flex; align-items: flex-start; gap: 12px;
+            padding: 12px; border-radius: 8px; background: #f8fafc;
+        }
+        .step-num {
+            width: 32px; height: 32px; border-radius: 50%;
+            background: var(--primary); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 800; flex-shrink: 0;
+        }
+        .step-title { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
+        .step-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+        @media (min-width: 768px) {
+            .home-hero { padding: 36px 28px; }
+            .home-hero h2 { font-size: 26px; }
+            .home-stats { grid-template-columns: repeat(4, 1fr); }
+            .home-stat-value { font-size: 34px; }
+            .steps-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        /* ---- Classifier Select ---- */
+        .clf-select {
+            padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+            font-size: 12px; font-weight: 600; background: #fff; cursor: pointer;
+            color: var(--text); width: 100%; max-width: 220px;
+        }
+        .clf-select:focus { border-color: var(--primary); outline: none; }
+        .clf-source { font-size: 10px; color: var(--text-light); font-weight: 500; }
+        .clf-chain { font-size: 11px; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -514,7 +566,8 @@
     </header>
 
     <div class="tab-bar">
-        <button class="tab-btn active" data-tab="review" onclick="switchTab('review')">
+        <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">Home</button>
+        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">
             Review <span class="tab-badge zero" id="pendingBadge">0</span>
         </button>
         <button class="tab-btn" data-tab="processed" onclick="switchTab('processed')">Processed</button>
@@ -540,8 +593,62 @@
         </div>
     </div>
 
+    <!-- HOME -->
+    <div class="tab-panel active" id="tab-home">
+        <div class="container">
+            <div class="home-hero">
+                <h2>Document Control Email Interface</h2>
+                <p>Automatically scans your mailbox, classifies incoming correspondence using AI, and queues emails for your review. Approve to assign transmittal numbers, save attachments, and log everything to Excel.</p>
+                <button class="btn btn-primary" onclick="switchTab('review')" style="margin-top:12px">Go to Review Queue</button>
+            </div>
+            <div class="home-stats" id="homeStats">
+                <div class="home-stat-card">
+                    <div class="home-stat-value" id="homePending">--</div>
+                    <div class="home-stat-label">Pending Review</div>
+                </div>
+                <div class="home-stat-card">
+                    <div class="home-stat-value" id="homeProcessed">--</div>
+                    <div class="home-stat-label">Processed</div>
+                </div>
+                <div class="home-stat-card">
+                    <div class="home-stat-value" id="homeDepts">--</div>
+                    <div class="home-stat-label">Departments</div>
+                </div>
+                <div class="home-stat-card">
+                    <div class="home-stat-value" id="homeContacts">--</div>
+                    <div class="home-stat-label">Contacts</div>
+                </div>
+            </div>
+            <div class="home-steps">
+                <h3>How It Works</h3>
+                <div class="steps-grid">
+                    <div class="step-card">
+                        <div class="step-num">1</div>
+                        <div class="step-title">Scan</div>
+                        <div class="step-desc">Connects to your mailbox via IMAP and fetches unread emails on a schedule or on demand.</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-num">2</div>
+                        <div class="step-title">Classify</div>
+                        <div class="step-desc">AI or keyword-based engine categorizes each email by document type, discipline, and department.</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-num">3</div>
+                        <div class="step-title">Review</div>
+                        <div class="step-desc">You review, edit classifications, then approve or reject from the dashboard.</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-num">4</div>
+                        <div class="step-title">Track</div>
+                        <div class="step-desc">Approved emails get a transmittal number, attachments are saved, and everything is logged to Excel.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- REVIEW QUEUE -->
-    <div class="tab-panel active" id="tab-review">
+    <div class="tab-panel" id="tab-review">
         <div class="container">
             <div class="control-bar">
                 <div class="control-card scanner">
@@ -558,8 +665,16 @@
                 <div class="control-card classifier">
                     <div class="ctrl-label">Classifier Engine</div>
                     <div class="clf-row">
-                        <span class="clf-badge" id="classifierLabel"><span class="clf-dot keywords"></span> Loading...</span>
+                        <select class="clf-select" id="classifierSelect" onchange="changeClassifierMethod()">
+                            <option value="auto">Auto (fallback chain)</option>
+                            <option value="rule_based">Keywords Only</option>
+                            <option value="gemini">Gemini</option>
+                            <option value="groq">Groq</option>
+                            <option value="claude_api">Claude API</option>
+                        </select>
                     </div>
+                    <div class="clf-source" id="classifierSource"></div>
+                    <div class="clf-chain" id="classifierChain"></div>
                     <div class="clf-keys" id="classifierKeys"></div>
                 </div>
             </div>
@@ -738,6 +853,7 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active');});
     document.querySelector('[data-tab="'+tab+'"]').classList.add('active');
     document.getElementById('tab-'+tab).classList.add('active');
+    if(tab==='home') fetchHomeStats();
     if(tab==='review') fetchPending();
     if(tab==='processed'){fetchEmails();fetchStatus();}
     if(tab==='departments') fetchDepartments();
@@ -1169,13 +1285,38 @@ function fetchClassificationOptions(){fetch('/api/classification-options').then(
 // ---- Classifier Info ----
 function fetchClassifierInfo(){
     fetch('/api/classifier-info').then(function(r){return r.json();}).then(function(d){
-        var lbl=document.getElementById('classifierLabel'), kEl=document.getElementById('classifierKeys');
-        var isAI=d.keys.gemini||d.keys.groq||d.keys.claude;
-        lbl.innerHTML='<span class="clf-dot '+(isAI?'ai':'keywords')+'"></span> '+esc(d.active_label);
+        var sel=document.getElementById('classifierSelect');
+        sel.value=d.method;
+        var srcEl=document.getElementById('classifierSource');
+        srcEl.textContent=d.source==='dashboard'?'Set from dashboard':'From config file ('+d.yaml_default+')';
+        var chainEl=document.getElementById('classifierChain');
+        chainEl.textContent=d.active_label;
+        var kEl=document.getElementById('classifierKeys');
         var kh='';
         [{key:'gemini',label:'Gemini'},{key:'groq',label:'Groq'},{key:'claude',label:'Claude'}].forEach(function(k){
             kh+='<span class="key-pill '+(d.keys[k.key]?'on':'off')+'">'+k.label+(d.keys[k.key]?' ON':' OFF')+'</span>';
         }); kEl.innerHTML=kh;
+    }).catch(function(){});
+}
+function changeClassifierMethod(){
+    var sel=document.getElementById('classifierSelect');
+    var method=sel.value;
+    fetch('/api/settings/classifier-method',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({method:method})})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Classifier set to '+d.active_label,'success');
+        document.getElementById('classifierSource').textContent='Set from dashboard';
+        document.getElementById('classifierChain').textContent=d.active_label;
+    }).catch(function(){showToast('Failed to update classifier','error');});
+}
+
+// ---- Home Stats ----
+function fetchHomeStats(){
+    fetch('/api/home-stats').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('homePending').textContent=d.pending_review;
+        document.getElementById('homeProcessed').textContent=d.total_processed;
+        document.getElementById('homeDepts').textContent=d.departments;
+        document.getElementById('homeContacts').textContent=d.contacts;
     }).catch(function(){});
 }
 
@@ -1183,7 +1324,7 @@ function fetchClassifierInfo(){
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&currentModalId)closeDetailModal();});
 
 // ---- Init ----
-fetchClassificationOptions(); fetchClassifierInfo(); fetchStatus(); fetchPending();
+fetchClassificationOptions(); fetchClassifierInfo(); fetchStatus(); fetchPending(); fetchHomeStats();
 setInterval(function(){if(document.getElementById('tab-review').classList.contains('active')){fetchPending();fetchStatus();}},30000);
 </script>
 </body>
