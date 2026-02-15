@@ -1,0 +1,83 @@
+# Reference Number Extraction (regex patterns)
+ref_regexes:
+  - '(?i)\b[A-Z]\d{5}-[A-Z]{2,5}-\d+(?:-[A-Z0-9]+)?\b'
+  - '(?i)\bREF\s*[:#]?\s*([A-Z0-9._/-]{4,})\b'
+
+# Document Type Classification (keyword matching)
+type_keywords:
+  BMSCL: ['billing milestone', 'invoice', 'billing']
+  ICT: ['ict', 'network', 'lan', 'wan', 'fiber', 'switch', 'router']
+  Civil: ['civil', 'concrete', 'excavation', 'road', 'drainage']
+  RFI: ['rfi', 'request for information']
+  Submittal: ['submittal', 'approval']
+  Others: []
+
+# Discipline Classification
+discipline_keywords:
+  General: ['general', 'meeting', 'coordination']
+  Networking: ['network', 'lan', 'wan', 'fiber', 'cabling']
+  Electrical: ['electrical', 'lv', 'hv', 'panel', 'cable']
+  Civil: ['excavation', 'trench', 'duct', 'concrete']
+  Procurement: ['quotation', 'rfq', 'purchase', 'invoice']
+
+# Response Required Detection
+response_required_phrases:
+  - 'please confirm'
+  - 'kindly confirm'
+  - 'action required'
+  - 'urgent'
+  - 'need your approval'
+
+# Skip Processing Filters
+skip_filters:
+  sender_domains:
+    - "noreply@"
+    - "donotreply@"
+    - "automated@"
+  subject_patterns:
+    - "^Out of Office:"
+    - "^Automatic reply:"
+    - "^Delivery Status Notification"
+
+# Classifier Settings
+# Methods: rule_based | claude_api | gemini | groq | auto
+# "auto" tries AI classifiers in order (Gemini > Groq > Claude) and falls back to rule_based
+classifier:
+  method: auto
+  claude_api:
+    api_key_env: ANTHROPIC_API_KEY       # Set this env var with your Anthropic API key
+    model: claude-sonnet-4-5-20250929
+    max_body_chars: 2000
+    fallback_on_error: true
+  gemini:
+    api_key_env: GEMINI_API_KEY          # Set this env var with your Google AI API key
+    model: gemini-2.5-flash-lite
+    max_body_chars: 2000
+    fallback_on_error: true
+  groq:
+    api_key_env: GROQ_API_KEY            # Set this env var with your Groq API key
+    model: llama-3.3-70b-versatile
+    max_body_chars: 2000
+    fallback_on_error: true
+
+# Scope Keywords - emails matching any of these are considered in-scope
+scope_keywords:
+  - transmittal
+  - submittal
+  - rfi
+  - request for information
+  - drawing
+  - document
+  - specification
+  - shop drawing
+  - method statement
+  - inspection request
+  - ncr
+  - approval
+  - as-built
+  - ifc
+  - correspondence
+
+# Transmittal Settings
+transmittal:
+  prefix: "TRN"

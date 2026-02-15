@@ -1,0 +1,35 @@
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+myenv/
+env/
+
+# Sensitive config (use .example files as templates)
+config/email_config.yaml
+config/classification_config.yaml
+
+# Auth tokens
+config/.token_cache.bin
+
+# Runtime data
+data/
+logs/
+Attachments/
+*.db
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

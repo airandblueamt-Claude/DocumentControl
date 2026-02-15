@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Control - Email Monitor</title>
+    <style>
+        :root {
+            --bg: #f4f6f9;
+            --card: #fff;
+            --border: #e2e6ed;
+            --text: #1e293b;
+            --text-muted: #64748b;
+            --text-light: #94a3b8;
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --success: #10b981;
+            --success-dark: #059669;
+            --danger: #ef4444;
+            --danger-dark: #dc2626;
+            --warn: #f59e0b;
+            --purple: #8b5cf6;
+            --header-bg: #0f172a;
+            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.12);
+            --radius: 10px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            font-size: 13px;
+        }
+
+        /* ---- Header ---- */
+        header {
+            background: var(--header-bg);
+            color: #fff;
+            padding: 0 28px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        header h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
+        .header-right { display: flex; align-items: center; gap: 16px; }
+        .status-pill {
+            display: flex; align-items: center; gap: 7px;
+            font-size: 12px; font-weight: 500;
+            padding: 5px 14px; border-radius: 20px;
+            background: rgba(255,255,255,0.08);
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.idle { background: #22c55e; }
+        .status-dot.scanning { background: var(--warn); animation: pulse 1s infinite; }
+        .status-dot.error { background: var(--danger); }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+        /* ---- Tabs ---- */
+        .tab-bar {
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            padding: 0 28px;
+            gap: 4px;
+        }
+        .tab-btn {
+            padding: 14px 18px;
+            font-size: 13px; font-weight: 600;
+            color: var(--text-muted);
+            background: none; border: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all .15s;
+        }
+        .tab-btn:hover { color: var(--text); }
+        .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .tab-badge {
+            display: inline-block; background: var(--danger); color: #fff;
+            font-size: 10px; font-weight: 700;
+            min-width: 18px; height: 18px; line-height: 18px;
+            text-align: center; border-radius: 9px;
+            padding: 0 5px; margin-left: 4px;
+        }
+        .tab-badge.zero { background: var(--text-light); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ---- Layout ---- */
+        .container { max-width: 1440px; margin: 0 auto; padding: 20px 28px; }
+
+        /* ---- Control Bar (scanner + classifier) ---- */
+        .control-bar {
+            display: flex; gap: 14px; margin-bottom: 18px;
+        }
+        .control-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 16px 20px;
+            display: flex; align-items: center; gap: 20px;
+        }
+        .control-card.scanner { flex: 1; }
+        .control-card.classifier { min-width: 260px; flex-direction: column; align-items: flex-start; gap: 8px; }
+        .ctrl-items { display: flex; gap: 24px; flex: 1; }
+        .ctrl-item { display: flex; flex-direction: column; }
+        .ctrl-label { font-size: 10px; color: var(--text-light); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+        .ctrl-value { font-size: 13px; font-weight: 600; color: var(--text); }
+        .ctrl-value.ok { color: var(--success); }
+        .ctrl-value.err { color: var(--danger); }
+
+        .clf-row { display: flex; align-items: center; gap: 8px; }
+        .clf-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 12px; font-weight: 600;
+            padding: 4px 12px; border-radius: 6px;
+            background: #f1f5f9; color: var(--text);
+        }
+        .clf-dot { width: 7px; height: 7px; border-radius: 50%; }
+        .clf-dot.ai { background: var(--purple); }
+        .clf-dot.keywords { background: var(--warn); }
+        .clf-keys { display: flex; gap: 5px; }
+        .key-pill {
+            font-size: 10px; font-weight: 600;
+            padding: 2px 8px; border-radius: 4px;
+        }
+        .key-pill.on { background: #dcfce7; color: #166534; }
+        .key-pill.off { background: #f1f5f9; color: var(--text-light); }
+
+        /* ---- Buttons ---- */
+        .btn {
+            border: none; padding: 6px 14px; border-radius: 6px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            transition: all .15s; white-space: nowrap;
+            display: inline-flex; align-items: center; gap: 5px;
+        }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-success { background: var(--success); color: #fff; }
+        .btn-success:hover { background: var(--success-dark); }
+        .btn-danger { background: var(--danger); color: #fff; }
+        .btn-danger:hover { background: var(--danger-dark); }
+        .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+        .btn-ghost:hover { background: #f8fafc; color: var(--text); }
+        .btn:disabled { opacity: .45; cursor: not-allowed; }
+        .btn-scan { padding: 9px 22px; font-size: 13px; }
+
+        /* ---- Table Card ---- */
+        .table-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); margin-bottom: 18px;
+        }
+        .table-toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 18px; border-bottom: 1px solid var(--border);
+            gap: 12px; flex-wrap: wrap;
+        }
+        .toolbar-left { display: flex; align-items: center; gap: 12px; }
+        .toolbar-left h2 { font-size: 15px; font-weight: 700; white-space: nowrap; }
+        .toolbar-right { display: flex; align-items: center; gap: 8px; }
+        .bulk-bar { display: flex; align-items: center; gap: 6px; }
+        .bulk-count { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+
+        /* Search input */
+        .search-box {
+            padding: 6px 12px 6px 32px;
+            border: 1px solid var(--border); border-radius: 6px;
+            font-size: 12px; width: 220px;
+            background: #f8fafc url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") 10px center no-repeat;
+            transition: border-color .15s;
+        }
+        .search-box:focus { border-color: var(--primary); outline: none; background-color: #fff; }
+
+        /* View toggle */
+        .view-toggle {
+            padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px;
+            font-size: 10px; font-weight: 700; cursor: pointer;
+            background: #fff; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: .4px;
+        }
+        .view-toggle:hover { background: #f8fafc; }
+        .view-toggle.expanded { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+        /* Table */
+        .table-wrap { overflow-x: auto; }
+        table {
+            width: 100%; border-collapse: collapse;
+            font-size: 12px; table-layout: auto;
+        }
+        thead th {
+            text-align: left; padding: 10px 12px;
+            background: #f8fafc; color: var(--text-muted);
+            font-weight: 600; font-size: 10px;
+            text-transform: uppercase; letter-spacing: .4px;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            position: sticky; top: 0; z-index: 2;
+        }
+        tbody tr { border-bottom: 1px solid #f1f5f9; transition: background .1s; }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:hover { background: #f8fafc; }
+        tbody td { padding: 10px 12px; vertical-align: top; }
+
+        /* Row number */
+        td.col-num { color: var(--text-light); font-size: 11px; font-weight: 500; text-align: center; width: 30px; }
+
+        td.col-subject { max-width: 360px; }
+        td.col-sender { max-width: 180px; }
+        td.col-subject, td.col-sender {
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .table-expanded td.col-subject,
+        .table-expanded td.col-sender {
+            max-width: none; white-space: normal;
+            word-wrap: break-word; overflow-wrap: break-word;
+        }
+        td.col-actions { white-space: nowrap; }
+
+        .subject-link { cursor: pointer; color: var(--primary); font-weight: 500; }
+        .subject-link:hover { text-decoration: underline; }
+
+        .inline-select {
+            padding: 4px 6px; border: 1px solid var(--border); border-radius: 5px;
+            font-size: 11px; background: #fff; cursor: pointer; max-width: 100px;
+        }
+        .inline-select:focus { border-color: var(--primary); outline: none; }
+
+        .row-actions { display: flex; gap: 4px; }
+        input[type="checkbox"] { cursor: pointer; width: 15px; height: 15px; accent-color: var(--primary); }
+
+        .empty-state { padding: 48px 20px; text-align: center; color: var(--text-light); font-size: 14px; }
+
+        /* Sender badges */
+        .sender-known, .sender-unknown {
+            display: inline-block; font-size: 9px; font-weight: 700;
+            padding: 1px 6px; border-radius: 4px; margin-left: 4px; vertical-align: middle;
+        }
+        .sender-known { background: #dcfce7; color: #166534; }
+        .sender-unknown { background: #fef3c7; color: #92400e; }
+        .sender-company { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+        .resp-yes { color: var(--danger); font-weight: 600; }
+        .resp-no { color: var(--text-light); }
+
+        /* Attachments in table */
+        .att-list { display: flex; flex-direction: column; gap: 2px; }
+        .att-list a {
+            font-size: 11px; color: var(--primary); text-decoration: none;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            max-width: 160px; display: block;
+        }
+        .att-list a:hover { text-decoration: underline; }
+        .att-list a.att-signature { color: var(--text-light); text-decoration: line-through; }
+        .att-size { color: var(--text-light); font-size: 9px; margin-left: 2px; }
+        .tag-signature {
+            background: #fef3c7; color: #92400e;
+            font-size: 9px; font-weight: 600;
+            padding: 1px 5px; border-radius: 4px; margin-left: 3px;
+        }
+
+        /* Tags */
+        .tag {
+            display: inline-block; background: #f1f5f9; color: var(--text-muted);
+            font-size: 10px; padding: 2px 8px; border-radius: 4px; margin: 1px;
+        }
+        .active-badge { color: var(--success); font-weight: 600; }
+        .inactive-badge { color: var(--text-light); font-weight: 600; }
+
+        /* ---- Stats Cards ---- */
+        .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+        .stat-card {
+            background: var(--card); border-radius: var(--radius);
+            padding: 18px 22px; box-shadow: var(--shadow);
+        }
+        .stat-card .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+        .stat-card .value { font-size: 30px; font-weight: 800; color: var(--text); }
+
+        /* ---- Log Panel ---- */
+        .log-panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 18px; }
+        .log-header {
+            padding: 14px 18px; border-bottom: 1px solid var(--border);
+            cursor: pointer; display: flex; justify-content: space-between;
+            align-items: center; user-select: none;
+        }
+        .log-header h2 { font-size: 15px; font-weight: 700; }
+        .log-header .toggle { font-size: 16px; color: var(--text-light); }
+        .log-body {
+            display: none; max-height: 260px; overflow-y: auto;
+            padding: 12px 18px; background: #0f172a; border-radius: 0 0 var(--radius) var(--radius);
+        }
+        .log-body.open { display: block; }
+        .log-line {
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 11px; color: #94a3b8; line-height: 1.7;
+            white-space: pre-wrap; word-break: break-all;
+        }
+
+        /* ---- Forms ---- */
+        .add-form {
+            display: flex; gap: 10px; align-items: flex-end;
+            padding: 14px 18px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+        }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: 10px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }
+        .form-group input {
+            padding: 7px 12px; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 13px; transition: border-color .15s;
+        }
+        .form-group input:focus { border-color: var(--primary); outline: none; }
+
+        /* ---- Toast ---- */
+        .toast-container { position: fixed; top: 16px; right: 16px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; }
+        .toast {
+            padding: 12px 20px; border-radius: 8px; color: #fff;
+            font-size: 13px; font-weight: 500;
+            box-shadow: var(--shadow-lg); animation: slideIn .25s ease; max-width: 380px;
+        }
+        .toast-success { background: var(--success); }
+        .toast-error { background: var(--danger); }
+        .toast-info { background: var(--primary); }
+        @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+
+        /* ---- Detail Modal ---- */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(15,23,42,0.6); backdrop-filter: blur(4px);
+            z-index: 2000;
+            justify-content: center; align-items: flex-start;
+            padding: 48px 20px; overflow-y: auto;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: var(--card); border-radius: 14px;
+            width: 100%; max-width: 780px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+        }
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 18px 24px; border-bottom: 1px solid var(--border);
+        }
+        .modal-header h2 { font-size: 16px; font-weight: 700; flex: 1; margin-right: 12px; word-break: break-word; }
+        .modal-close {
+            background: none; border: none; font-size: 20px; cursor: pointer;
+            color: var(--text-light); width: 32px; height: 32px; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-close:hover { background: #f1f5f9; color: var(--text); }
+        .modal-body { padding: 24px; max-height: 68vh; overflow-y: auto; }
+        .modal-field { margin-bottom: 16px; }
+        .modal-field-label { font-size: 10px; font-weight: 700; color: var(--text-light); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+        .modal-field-value { font-size: 13px; color: var(--text); }
+        .modal-body-text {
+            background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+            padding: 14px; max-height: 320px; overflow-y: auto;
+            white-space: pre-wrap; word-wrap: break-word;
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 12px; line-height: 1.6; color: #334155;
+        }
+        .modal-fields-row { display: flex; gap: 16px; margin-bottom: 16px; }
+        .modal-fields-row .modal-field { flex: 1; margin-bottom: 0; }
+        .modal-att-list { display: flex; flex-direction: column; gap: 6px; }
+        .modal-att-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+        .modal-att-item a { color: var(--primary); text-decoration: none; font-weight: 500; }
+        .modal-att-item a:hover { text-decoration: underline; }
+        .modal-att-item.signature a { color: var(--text-light); text-decoration: line-through; }
+        .modal-footer {
+            display: flex; justify-content: flex-end; gap: 8px;
+            padding: 16px 24px; border-top: 1px solid var(--border);
+        }
+        .modal-footer .btn { padding: 9px 22px; font-size: 13px; }
+        .modal-select {
+            padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+            font-size: 12px; background: #fff; cursor: pointer; width: 100%;
+        }
+        .modal-select:focus { border-color: var(--primary); outline: none; }
+        .body-toggle {
+            display: inline-block; margin-top: 8px; font-size: 11px;
+            color: var(--primary); cursor: pointer; font-weight: 600;
+        }
+        .body-toggle:hover { text-decoration: underline; }
+
+        /* ---- Pagination ---- */
+        .table-footer {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 18px; border-top: 1px solid var(--border);
+            font-size: 12px; color: var(--text-muted);
+        }
+        .pagination { display: flex; gap: 4px; }
+        .page-btn {
+            padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px;
+            background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-muted);
+        }
+        .page-btn:hover { background: #f8fafc; color: var(--text); }
+        .page-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .page-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1024px) {
+            .control-bar { flex-direction: column; }
+            .stats-row { grid-template-columns: 1fr; }
+            .container { padding: 16px 12px; }
+        }
+        @media (max-width: 768px) {
+            .modal { max-width: 100%; }
+            .modal-fields-row { flex-direction: column; }
+            .search-box { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Document Control</h1>
+        <div class="header-right">
+            <div class="status-pill">
+                <span class="status-dot idle" id="headerDot"></span>
+                <span id="headerStatus">Idle</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="tab-bar">
+        <button class="tab-btn active" data-tab="review" onclick="switchTab('review')">
+            Review Queue <span class="tab-badge zero" id="pendingBadge">0</span>
+        </button>
+        <button class="tab-btn" data-tab="processed" onclick="switchTab('processed')">Processed</button>
+        <button class="tab-btn" data-tab="departments" onclick="switchTab('departments')">Departments</button>
+        <button class="tab-btn" data-tab="contacts" onclick="switchTab('contacts')">Contacts</button>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Detail Modal -->
+    <div class="modal-overlay" id="detailModal" onclick="closeModalOverlay(event)">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modalSubject">--</h2>
+                <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>
+                <button class="btn btn-danger" onclick="modalReject()">Reject</button>
+                <button class="btn btn-success" onclick="modalApprove()">Approve</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- REVIEW QUEUE -->
+    <div class="tab-panel active" id="tab-review">
+        <div class="container">
+            <div class="control-bar">
+                <div class="control-card scanner">
+                    <div class="ctrl-items">
+                        <div class="ctrl-item"><span class="ctrl-label">Status</span><span class="ctrl-value" id="scanStatus">--</span></div>
+                        <div class="ctrl-item"><span class="ctrl-label">Last Scan</span><span class="ctrl-value" id="scanLast">--</span></div>
+                        <div class="ctrl-item"><span class="ctrl-label">Result</span><span class="ctrl-value" id="scanResult">--</span></div>
+                        <div class="ctrl-item"><span class="ctrl-label">Next Scan</span><span class="ctrl-value" id="scanNext">--</span></div>
+                    </div>
+                    <button class="btn btn-primary btn-scan" id="btnScan" onclick="triggerScan()">Scan Now</button>
+                </div>
+                <div class="control-card classifier">
+                    <div class="ctrl-label">Classifier Engine</div>
+                    <div class="clf-row">
+                        <span class="clf-badge" id="classifierLabel"><span class="clf-dot keywords"></span> Loading...</span>
+                    </div>
+                    <div class="clf-keys" id="classifierKeys"></div>
+                </div>
+            </div>
+
+            <div class="table-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <h2>Pending Review</h2>
+                        <button class="view-toggle" id="pendingViewToggle" onclick="toggleView('pending')">Expanded</button>
+                    </div>
+                    <div class="toolbar-right">
+                        <div class="bulk-bar" id="bulkActions" style="display:none">
+                            <span class="bulk-count" id="bulkCount">0</span>
+                            <button class="btn btn-success" onclick="bulkApprove()">Approve</button>
+                            <button class="btn btn-danger" onclick="bulkReject()">Reject</button>
+                        </div>
+                        <input class="search-box" id="pendingSearch" type="text" placeholder="Filter emails..." oninput="filterPending()">
+                    </div>
+                </div>
+                <div id="pendingTableWrap">
+                    <div class="empty-state">No emails pending review. Click "Scan Now" to check.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROCESSED -->
+    <div class="tab-panel" id="tab-processed">
+        <div class="container">
+            <div class="stats-row">
+                <div class="stat-card"><div class="label">Total Processed</div><div class="value" id="statTotal">--</div></div>
+                <div class="stat-card"><div class="label">Processed Today</div><div class="value" id="statToday">--</div></div>
+                <div class="stat-card"><div class="label">With Attachments</div><div class="value" id="statAttach">--</div></div>
+            </div>
+            <div class="table-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <h2>Recent Processed</h2>
+                        <button class="view-toggle" id="processedViewToggle" onclick="toggleView('processed')">Expanded</button>
+                    </div>
+                    <div class="toolbar-right">
+                        <input class="search-box" id="processedSearch" type="text" placeholder="Filter processed..." oninput="filterProcessed()">
+                    </div>
+                </div>
+                <div id="emailTableWrap"><div class="empty-state">No emails processed yet.</div></div>
+            </div>
+            <div class="log-panel">
+                <div class="log-header" onclick="toggleLog()">
+                    <h2>Activity Log</h2><span class="toggle" id="logToggle">+</span>
+                </div>
+                <div class="log-body" id="logBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEPARTMENTS -->
+    <div class="tab-panel" id="tab-departments">
+        <div class="container">
+            <div class="table-card">
+                <div class="table-toolbar"><div class="toolbar-left"><h2>Departments</h2></div></div>
+                <div class="add-form">
+                    <div class="form-group"><label>Name</label><input type="text" id="deptName" placeholder="e.g. MEP" style="width:140px"></div>
+                    <div class="form-group"><label>Keywords (comma-separated)</label><input type="text" id="deptKeywords" placeholder="e.g. mechanical, plumbing" style="width:340px"></div>
+                    <button class="btn btn-primary" onclick="addDepartment()">Add</button>
+                </div>
+                <div id="deptTableWrap"><div class="empty-state">No departments configured.</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTACTS -->
+    <div class="tab-panel" id="tab-contacts">
+        <div class="container">
+            <div class="table-card">
+                <div class="table-toolbar"><div class="toolbar-left"><h2>Expected Senders</h2></div></div>
+                <div class="add-form">
+                    <div class="form-group"><label>Name</label><input type="text" id="contactName" placeholder="e.g. John Smith" style="width:150px"></div>
+                    <div class="form-group"><label>Email</label><input type="text" id="contactEmail" placeholder="e.g. john@co.com" style="width:200px"></div>
+                    <div class="form-group"><label>Company</label><input type="text" id="contactCompany" placeholder="e.g. AECOM" style="width:140px"></div>
+                    <div class="form-group"><label>Dept.</label><input type="text" id="contactDept" placeholder="e.g. Eng." style="width:120px"></div>
+                    <div class="form-group"><label>Notes</label><input type="text" id="contactNotes" placeholder="Optional" style="width:140px"></div>
+                    <button class="btn btn-primary" onclick="addContact()">Add</button>
+                </div>
+                <div id="contactTableWrap"><div class="empty-state">No contacts added yet.</div></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ---- State ----
+var classificationOptions = { doc_types: [], disciplines: [], departments: [] };
+var pendingEmails = [];
+var processedEmails = [];
+var selectedIds = new Set();
+var viewModes = { pending: 'compact', processed: 'compact' };
+var currentModalId = null;
+var modalBodyFull = '', modalBodySummary = '', showingFullBody = false;
+var pendingPage = 0, processedPage = 0;
+var PAGE_SIZE = 15;
+
+// ---- Helpers ----
+function esc(s) { if(!s) return ''; var el=document.createElement('span'); el.textContent=s; return el.innerHTML; }
+function fmtTime(iso) {
+    if(!iso) return '--';
+    var d=new Date(iso), dd=d.getDate(),
+    mm=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()],
+    hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
+    return dd+' '+mm+' '+hh+':'+mi;
+}
+function showToast(msg,type) {
+    type=type||'info'; var c=document.getElementById('toastContainer');
+    var t=document.createElement('div'); t.className='toast toast-'+type; t.textContent=msg;
+    c.appendChild(t); setTimeout(function(){t.remove();},4000);
+}
+function makeOptions(vals,sel) {
+    return vals.map(function(v){return '<option value="'+esc(v)+'"'+(v===sel?' selected':'')+'>'+esc(v)+'</option>';}).join('');
+}
+function fmtRecipients(jsonStr) {
+    var arr; try{arr=JSON.parse(jsonStr||'[]');}catch(e){return esc(jsonStr||'');}
+    if(!Array.isArray(arr)||!arr.length) return '<span style="color:var(--text-light)">--</span>';
+    return arr.map(function(r){
+        if(typeof r==='string') return esc(r);
+        var n=(r.name||'').trim(), e2=(r.email||'').trim();
+        if(n&&e2) return esc(n+' <'+e2+'>'); return esc(n||e2);
+    }).join(', ');
+}
+function fmtFileSize(b) {
+    if(!b||b===0) return ''; if(b<1024) return b+' B';
+    if(b<1048576) return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB';
+}
+
+// ---- Pagination helper ----
+function paginate(items, page) {
+    var start = page * PAGE_SIZE;
+    return { items: items.slice(start, start + PAGE_SIZE), total: items.length, page: page, pages: Math.ceil(items.length / PAGE_SIZE) };
+}
+function renderPagination(containerId, totalItems, currentPage, onPageFn) {
+    var pages = Math.ceil(totalItems / PAGE_SIZE);
+    if (pages <= 1) return '';
+    var html = '<div class="table-footer"><span>Showing ' + (currentPage*PAGE_SIZE+1) + '-' + Math.min((currentPage+1)*PAGE_SIZE, totalItems) + ' of ' + totalItems + '</span><div class="pagination">';
+    html += '<button class="page-btn" onclick="'+onPageFn+'('+(currentPage-1)+')"' + (currentPage===0?' disabled':'') + '>&laquo;</button>';
+    for (var i=0; i<pages; i++) {
+        html += '<button class="page-btn'+(i===currentPage?' active':'')+'" onclick="'+onPageFn+'('+i+')">'+( i+1)+'</button>';
+    }
+    html += '<button class="page-btn" onclick="'+onPageFn+'('+(currentPage+1)+')"' + (currentPage>=pages-1?' disabled':'') + '>&raquo;</button>';
+    html += '</div></div>';
+    return html;
+}
+
+// ---- View Toggle ----
+function toggleView(t) {
+    var btn=document.getElementById(t+'ViewToggle');
+    if(viewModes[t]==='compact'){viewModes[t]='expanded';btn.classList.add('expanded');btn.textContent='Compact';}
+    else{viewModes[t]='compact';btn.classList.remove('expanded');btn.textContent='Expanded';}
+    if(t==='pending') renderPendingTable();
+    if(t==='processed') renderProcessedTable();
+}
+
+// ---- Tabs ----
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active');});
+    document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active');});
+    document.querySelector('[data-tab="'+tab+'"]').classList.add('active');
+    document.getElementById('tab-'+tab).classList.add('active');
+    if(tab==='review') fetchPending();
+    if(tab==='processed'){fetchEmails();fetchStatus();}
+    if(tab==='departments') fetchDepartments();
+    if(tab==='contacts') fetchContacts();
+}
+
+// ---- Scanner ----
+function updateStatus(data) {
+    var dot=document.getElementById('headerDot'), hdr=document.getElementById('headerStatus');
+    dot.className='status-dot '+data.status;
+    var labels={idle:'Idle',scanning:'Scanning...',error:'Error'};
+    hdr.textContent=labels[data.status]||data.status;
+    document.getElementById('scanStatus').textContent=labels[data.status]||data.status;
+    document.getElementById('scanLast').textContent=fmtTime(data.last_scan_time);
+    document.getElementById('scanNext').textContent=fmtTime(data.next_scan_time);
+    var sr=document.getElementById('scanResult');
+    if(data.last_scan_result){sr.textContent=data.last_scan_result;sr.className='ctrl-value '+(data.last_scan_ok?'ok':'err');}
+    var btn=document.getElementById('btnScan');
+    if(data.status==='scanning'){btn.disabled=true;btn.textContent='Scanning...';}
+    else{btn.disabled=false;btn.textContent='Scan Now';}
+}
+function fetchStatus(){fetch('/api/status').then(function(r){return r.json();}).then(updateStatus).catch(function(){});}
+function triggerScan() {
+    var btn=document.getElementById('btnScan'); btn.disabled=true; btn.textContent='Starting...';
+    fetch('/api/scan',{method:'POST'}).then(function(r){
+        if(r.status===409){btn.textContent='Already running';setTimeout(function(){btn.disabled=false;btn.textContent='Scan Now';},2000);return;}
+        startScanPolling();
+    }).catch(function(){btn.disabled=false;btn.textContent='Scan Now';});
+}
+var scanPollTimer=null;
+function startScanPolling(){
+    if(scanPollTimer)clearInterval(scanPollTimer);
+    scanPollTimer=setInterval(function(){
+        fetch('/api/status').then(function(r){return r.json();}).then(function(d){
+            updateStatus(d);if(d.status!=='scanning'){clearInterval(scanPollTimer);scanPollTimer=null;fetchPending();fetchEmails();}
+        }).catch(function(){});
+    },2000);
+}
+
+// ---- Review Queue ----
+function fetchPending() {
+    fetch('/api/pending').then(function(r){return r.json();}).then(function(data){
+        pendingEmails=data.emails||[];
+        var stats=data.stats||{}, count=stats.pending_review||0;
+        var badge=document.getElementById('pendingBadge');
+        badge.textContent=count; badge.className='tab-badge'+(count===0?' zero':'');
+        pendingPage=0; renderPendingTable();
+    }).catch(function(){});
+}
+function getFilteredPending() {
+    var q=(document.getElementById('pendingSearch').value||'').toLowerCase().trim();
+    if(!q) return pendingEmails;
+    return pendingEmails.filter(function(e){
+        return (e.subject||'').toLowerCase().indexOf(q)>=0 ||
+               (e.sender||'').toLowerCase().indexOf(q)>=0 ||
+               (e.sender_name||'').toLowerCase().indexOf(q)>=0 ||
+               (e.doc_type||'').toLowerCase().indexOf(q)>=0;
+    });
+}
+function filterPending() { pendingPage=0; renderPendingTable(); }
+function setPendingPage(p) { pendingPage=p; renderPendingTable(); }
+
+function renderPendingTable() {
+    var wrap=document.getElementById('pendingTableWrap');
+    var filtered=getFilteredPending();
+    if(!filtered.length){
+        wrap.innerHTML='<div class="empty-state">'+(pendingEmails.length?'No matches found.':'No emails pending review. Click "Scan Now" to check.')+'</div>';
+        document.getElementById('bulkActions').style.display='none'; return;
+    }
+    var pg=paginate(filtered, pendingPage);
+    var exp=viewModes.pending==='expanded'?' table-expanded':'';
+    var html='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
+        '<th style="width:30px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>'+
+        '<th style="width:30px">#</th><th>Date</th><th>From</th><th>Subject</th><th>Att.</th>'+
+        '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Actions</th>'+
+        '</tr></thead><tbody>';
+    for(var i=0;i<pg.items.length;i++){
+        var e=pg.items[i], idx=pg.page*PAGE_SIZE+i+1;
+        var checked=selectedIds.has(e.id)?' checked':'';
+        var senderBadge=e.sender_known?'<span class="sender-known">Known</span>':'<span class="sender-unknown">Unknown</span>';
+        var senderCompany=e.sender_company?'<span class="sender-company">'+esc(e.sender_company)+'</span>':'';
+        html+='<tr>'+
+            '<td><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></td>'+
+            '<td class="col-num">'+idx+'</td>'+
+            '<td style="white-space:nowrap">'+fmtTime(e.scanned_at)+'</td>'+
+            '<td class="col-sender" title="'+esc(e.sender)+'">'+esc(e.sender_name||e.sender)+senderBadge+senderCompany+'</td>'+
+            '<td class="col-subject"><span class="subject-link" onclick="openDetailModal('+e.id+')">'+esc(e.subject)+'</span></td>'+
+            '<td id="att-cell-'+e.id+'">'+(e.attachment_count||0)+'</td>'+
+            '<td><select class="inline-select" data-id="'+e.id+'" data-field="doc_type">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></td>'+
+            '<td><select class="inline-select" data-id="'+e.id+'" data-field="discipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></td>'+
+            '<td><select class="inline-select" data-id="'+e.id+'" data-field="department"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></td>'+
+            '<td class="col-actions"><div class="row-actions">'+
+                '<button class="btn btn-success" onclick="approveOne('+e.id+')">Approve</button>'+
+                '<button class="btn btn-danger" onclick="rejectOne('+e.id+')">Reject</button>'+
+            '</div></td></tr>';
+    }
+    html+='</tbody></table></div>';
+    html+=renderPagination('pendingPag',filtered.length,pendingPage,'setPendingPage');
+    wrap.innerHTML=html;
+    updateBulkBar();
+    // Fetch attachments
+    pg.items.forEach(function(e){
+        if(e.attachment_count>0){
+            fetch('/api/pending/'+e.id+'/attachments').then(function(r){return r.json();}).then(function(data){
+                var cell=document.getElementById('att-cell-'+e.id);
+                if(!cell||!data.attachments||!data.attachments.length) return;
+                var links='<div class="att-list">';
+                data.attachments.forEach(function(att){
+                    var sz=fmtFileSize(att.size), sc=att.is_signature?' att-signature':'', st=att.is_signature?'<span class="tag-signature">Sig</span>':'';
+                    links+='<a href="/api/pending/'+e.id+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'" class="'+sc+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>'+st;
+                }); links+='</div>'; cell.innerHTML=links;
+            }).catch(function(){});
+        }
+    });
+}
+function toggleSelectAll(){
+    var ch=document.getElementById('selectAll').checked;
+    document.querySelectorAll('#pendingTableWrap input[type="checkbox"][data-id]').forEach(function(cb){
+        cb.checked=ch; var id=parseInt(cb.dataset.id); if(ch)selectedIds.add(id);else selectedIds.delete(id);
+    }); updateBulkBar();
+}
+function onRowSelect(){
+    selectedIds.clear();
+    document.querySelectorAll('#pendingTableWrap input[type="checkbox"][data-id]:checked').forEach(function(cb){selectedIds.add(parseInt(cb.dataset.id));});
+    updateBulkBar();
+}
+function updateBulkBar(){
+    var bar=document.getElementById('bulkActions'),cnt=document.getElementById('bulkCount');
+    if(selectedIds.size>0){bar.style.display='flex';cnt.textContent=selectedIds.size+' selected';}
+    else{bar.style.display='none';}
+}
+function getEditsForRow(id){
+    var edits={};
+    document.querySelectorAll('select.inline-select[data-id="'+id+'"]').forEach(function(s){edits[s.dataset.field]=s.value;});
+    return edits;
+}
+function approveOne(id){
+    var edits=getEditsForRow(id);
+    fetch('/api/pending/'+id+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(edits)})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Approved: '+d.transmittal_no,'success'); selectedIds.delete(id); fetchPending(); fetchEmails();
+    }).catch(function(){showToast('Approve failed','error');});
+}
+function rejectOne(id){
+    fetch('/api/pending/'+id+'/reject',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Rejected','info'); selectedIds.delete(id); fetchPending();
+    }).catch(function(){showToast('Reject failed','error');});
+}
+function bulkApprove(){
+    var ids=Array.from(selectedIds); if(!ids.length)return;
+    fetch('/api/pending/bulk-approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.approved&&d.approved.length) showToast('Approved '+d.approved.length,'success');
+        if(d.errors&&d.errors.length) showToast(d.errors.length+' failed','error');
+        selectedIds.clear(); fetchPending(); fetchEmails();
+    }).catch(function(){showToast('Bulk approve failed','error');});
+}
+function bulkReject(){
+    var ids=Array.from(selectedIds); if(!ids.length)return;
+    fetch('/api/pending/bulk-reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.rejected&&d.rejected.length) showToast('Rejected '+d.rejected.length,'info');
+        selectedIds.clear(); fetchPending();
+    }).catch(function(){showToast('Bulk reject failed','error');});
+}
+
+// ---- Detail Modal ----
+function openDetailModal(id){
+    currentModalId=id;
+    document.getElementById('modalSubject').textContent='Loading...';
+    document.getElementById('modalBody').innerHTML='<div class="empty-state">Loading...</div>';
+    document.getElementById('detailModal').classList.add('open');
+    fetch('/api/pending/'+id+'/detail').then(function(r){return r.json();}).then(function(e){
+        if(e.error){document.getElementById('modalBody').innerHTML='<div class="empty-state">'+esc(e.error)+'</div>';return;}
+        document.getElementById('modalSubject').textContent=e.subject||'(no subject)';
+        var to=fmtRecipients(e.to_recipients), cc=fmtRecipients(e.cc_recipients);
+        var h='';
+        h+='<div class="modal-fields-row">';
+        h+='<div class="modal-field"><div class="modal-field-label">From</div><div class="modal-field-value">'+esc(e.sender_name||e.sender);
+        h+=(e.sender_known?' <span class="sender-known">Known</span>':' <span class="sender-unknown">Unknown</span>');
+        if(e.sender_company) h+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
+        h+='</div></div>';
+        h+='<div class="modal-field"><div class="modal-field-label">Date</div><div class="modal-field-value">'+fmtTime(e.email_date||e.scanned_at)+'</div></div>';
+        h+='</div>';
+        h+='<div class="modal-fields-row">';
+        h+='<div class="modal-field"><div class="modal-field-label">To</div><div class="modal-field-value">'+to+'</div></div>';
+        h+='<div class="modal-field"><div class="modal-field-label">CC</div><div class="modal-field-value">'+cc+'</div></div>';
+        h+='</div>';
+        var summary=e.body_summary||'', full=e.body||'';
+        modalBodySummary=summary; modalBodyFull=full; showingFullBody=false;
+        h+='<div class="modal-field"><div class="modal-field-label">Body</div>';
+        if(summary){
+            h+='<div class="modal-body-text" id="modalBodyText">'+esc(summary)+'</div>';
+            if(full.length>summary.length) h+='<span class="body-toggle" id="bodyToggle" onclick="toggleFullBody()">Show full body</span>';
+        } else {
+            h+='<div class="modal-body-text" id="modalBodyText">'+esc(full||'(no body)')+'</div>';
+        }
+        h+='</div>';
+        var atts=e.attachments||[];
+        if(atts.length){
+            h+='<div class="modal-field"><div class="modal-field-label">Attachments ('+atts.length+')</div><div class="modal-att-list">';
+            atts.forEach(function(a){
+                var sc=a.is_signature?' signature':'', st=a.is_signature?' <span class="tag-signature">Signature</span>':'';
+                h+='<div class="modal-att-item'+sc+'"><a href="/api/pending/'+id+'/attachments/'+a.id+'" target="_blank">'+esc(a.filename)+'</a><span class="att-size">'+fmtFileSize(a.size)+'</span>'+st+'</div>';
+            }); h+='</div></div>';
+        }
+        h+='<div class="modal-fields-row">';
+        h+='<div class="modal-field"><div class="modal-field-label">Document Type</div><select class="modal-select" id="modalDocType">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></div>';
+        h+='<div class="modal-field"><div class="modal-field-label">Discipline</div><select class="modal-select" id="modalDiscipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></div>';
+        h+='<div class="modal-field"><div class="modal-field-label">Department</div><select class="modal-select" id="modalDepartment"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></div>';
+        h+='</div>';
+        document.getElementById('modalBody').innerHTML=h;
+    }).catch(function(){document.getElementById('modalBody').innerHTML='<div class="empty-state">Failed to load.</div>';});
+}
+function closeDetailModal(){document.getElementById('detailModal').classList.remove('open');currentModalId=null;}
+function closeModalOverlay(ev){if(ev.target===document.getElementById('detailModal'))closeDetailModal();}
+function toggleFullBody(){
+    var t=document.getElementById('modalBodyText'),b=document.getElementById('bodyToggle');
+    if(!t||!b)return; showingFullBody=!showingFullBody;
+    t.textContent=showingFullBody?modalBodyFull:modalBodySummary;
+    b.textContent=showingFullBody?'Show summary':'Show full body';
+}
+function modalApprove(){
+    if(!currentModalId)return;
+    var edits={doc_type:document.getElementById('modalDocType').value,discipline:document.getElementById('modalDiscipline').value,department:document.getElementById('modalDepartment').value};
+    fetch('/api/pending/'+currentModalId+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(edits)})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Approved: '+d.transmittal_no,'success'); closeDetailModal(); fetchPending(); fetchEmails();
+    }).catch(function(){showToast('Approve failed','error');});
+}
+function modalReject(){
+    if(!currentModalId)return;
+    fetch('/api/pending/'+currentModalId+'/reject',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;} showToast('Rejected','info'); closeDetailModal(); fetchPending();
+    }).catch(function(){showToast('Reject failed','error');});
+}
+
+// ---- Processed ----
+function fetchEmails(){
+    fetch('/api/emails').then(function(r){return r.json();}).then(function(data){
+        document.getElementById('statTotal').textContent=data.total;
+        document.getElementById('statToday').textContent=data.today;
+        document.getElementById('statAttach').textContent=data.with_attachments;
+        processedEmails=data.emails||[]; processedPage=0; renderProcessedTable();
+    }).catch(function(){});
+}
+function getFilteredProcessed(){
+    var q=(document.getElementById('processedSearch').value||'').toLowerCase().trim();
+    if(!q) return processedEmails;
+    return processedEmails.filter(function(e){
+        return (e.subject||'').toLowerCase().indexOf(q)>=0 ||
+               (e.sender||'').toLowerCase().indexOf(q)>=0 ||
+               (e.transmittal_no||'').toLowerCase().indexOf(q)>=0;
+    });
+}
+function filterProcessed(){processedPage=0;renderProcessedTable();}
+function setProcessedPage(p){processedPage=p;renderProcessedTable();}
+function renderProcessedTable(){
+    var wrap=document.getElementById('emailTableWrap');
+    var filtered=getFilteredProcessed();
+    if(!filtered.length){wrap.innerHTML='<div class="empty-state">'+(processedEmails.length?'No matches.':'No emails processed yet.')+'</div>';return;}
+    var pg=paginate(filtered,processedPage);
+    var exp=viewModes.processed==='expanded'?' table-expanded':'';
+    var html='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
+        '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>Subject</th>'+
+        '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
+    for(var i=0;i<pg.items.length;i++){
+        var e=pg.items[i], idx=pg.page*PAGE_SIZE+i+1;
+        var sd=esc(e.sender_name||e.sender);
+        if(e.sender_company) sd+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
+        var rc=e.response_required?'resp-yes':'resp-no', rt=e.response_required?'Yes':'No';
+        html+='<tr><td class="col-num">'+idx+'</td>'+
+            '<td><strong>'+esc(e.transmittal_no)+'</strong></td>'+
+            '<td style="white-space:nowrap">'+fmtTime(e.processed_at)+'</td>'+
+            '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
+            '<td class="col-subject">'+esc(e.subject)+'</td>'+
+            '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.department||'')+'</td>'+
+            '<td><span class="'+rc+'">'+rt+'</span></td><td>'+(e.attachment_count||0)+'</td></tr>';
+    }
+    html+='</tbody></table></div>';
+    html+=renderPagination('procPag',filtered.length,processedPage,'setProcessedPage');
+    wrap.innerHTML=html;
+}
+
+// ---- Log ----
+function toggleLog(){var b=document.getElementById('logBody'),t=document.getElementById('logToggle');b.classList.toggle('open');t.textContent=b.classList.contains('open')?'-':'+';if(b.classList.contains('open'))fetchLog();}
+function fetchLog(){fetch('/api/log').then(function(r){return r.json();}).then(function(d){var b=document.getElementById('logBody');if(!d.lines||!d.lines.length){b.innerHTML='<div class="log-line">No log entries.</div>';return;}b.innerHTML=d.lines.map(function(l){return '<div class="log-line">'+esc(l)+'</div>';}).join('');b.scrollTop=b.scrollHeight;}).catch(function(){});}
+
+// ---- Departments ----
+function fetchDepartments(){fetch('/api/departments').then(function(r){return r.json();}).then(function(d){var depts=d.departments||[],w=document.getElementById('deptTableWrap');if(!depts.length){w.innerHTML='<div class="empty-state">No departments configured.</div>';return;}var h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Keywords</th><th>Status</th><th>Actions</th></tr></thead><tbody>';for(var i=0;i<depts.length;i++){var dp=depts[i],kws=[];try{kws=JSON.parse(dp.keywords||'[]');}catch(e){}var kt=kws.map(function(k){return '<span class="tag">'+esc(k)+'</span>';}).join(' ');var sc=dp.is_active?'active-badge':'inactive-badge',st=dp.is_active?'Active':'Inactive',tt=dp.is_active?'Deactivate':'Activate';h+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(dp.name)+'</strong></td><td>'+(kt||'<span style="color:var(--text-light)">none</span>')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost" onclick="toggleDept('+dp.id+','+(dp.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger" onclick="deleteDept('+dp.id+',\''+esc(dp.name)+'\')">Delete</button></div></td></tr>';}h+='</tbody></table></div>';w.innerHTML=h;}).catch(function(){});}
+function addDepartment(){var n=document.getElementById('deptName').value.trim(),k=document.getElementById('deptKeywords').value.trim();if(!n){showToast('Name required','error');return;}var kw=k?k.split(',').map(function(s){return s.trim();}).filter(Boolean):[];fetch('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,keywords:kw})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('deptName').value='';document.getElementById('deptKeywords').value='';fetchDepartments();fetchClassificationOptions();}).catch(function(){showToast('Failed','error');});}
+function toggleDept(id,a){fetch('/api/departments/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active:a})}).then(function(r){return r.json();}).then(function(){fetchDepartments();fetchClassificationOptions();}).catch(function(){});}
+function deleteDept(id,n){if(!confirm('Delete "'+n+'"?'))return;fetch('/api/departments/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){showToast('Deleted','info');fetchDepartments();fetchClassificationOptions();}).catch(function(){});}
+
+// ---- Contacts ----
+function fetchContacts(){fetch('/api/contacts').then(function(r){return r.json();}).then(function(d){var cs=d.contacts||[],w=document.getElementById('contactTableWrap');if(!cs.length){w.innerHTML='<div class="empty-state">No contacts added yet.</div>';return;}var h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Company</th><th>Dept.</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead><tbody>';for(var i=0;i<cs.length;i++){var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';h+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(c.name)+'</strong></td><td>'+esc(c.email)+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.department||'')+'</td><td>'+esc(c.notes||'')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button></div></td></tr>';}h+='</tbody></table></div>';w.innerHTML=h;}).catch(function(){});}
+function addContact(){var n=document.getElementById('contactName').value.trim(),e=document.getElementById('contactEmail').value.trim(),co=document.getElementById('contactCompany').value.trim(),dp=document.getElementById('contactDept').value.trim(),nt=document.getElementById('contactNotes').value.trim();if(!n||!e){showToast('Name & email required','error');return;}fetch('/api/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,company:co,department:dp,notes:nt})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('contactName').value='';document.getElementById('contactEmail').value='';document.getElementById('contactCompany').value='';document.getElementById('contactDept').value='';document.getElementById('contactNotes').value='';fetchContacts();}).catch(function(){showToast('Failed','error');});}
+function toggleContact(id,a){fetch('/api/contacts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active:a})}).then(function(r){return r.json();}).then(function(){fetchContacts();}).catch(function(){});}
+function deleteContact(id,n){if(!confirm('Delete "'+n+'"?'))return;fetch('/api/contacts/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){showToast('Deleted','info');fetchContacts();}).catch(function(){});}
+
+// ---- Classification Options ----
+function fetchClassificationOptions(){fetch('/api/classification-options').then(function(r){return r.json();}).then(function(d){classificationOptions=d;}).catch(function(){});}
+
+// ---- Classifier Info ----
+function fetchClassifierInfo(){
+    fetch('/api/classifier-info').then(function(r){return r.json();}).then(function(d){
+        var lbl=document.getElementById('classifierLabel'), kEl=document.getElementById('classifierKeys');
+        var isAI=d.keys.gemini||d.keys.groq||d.keys.claude;
+        lbl.innerHTML='<span class="clf-dot '+(isAI?'ai':'keywords')+'"></span> '+esc(d.active_label);
+        var kh='';
+        [{key:'gemini',label:'Gemini'},{key:'groq',label:'Groq'},{key:'claude',label:'Claude'}].forEach(function(k){
+            kh+='<span class="key-pill '+(d.keys[k.key]?'on':'off')+'">'+k.label+(d.keys[k.key]?' ON':' OFF')+'</span>';
+        }); kEl.innerHTML=kh;
+    }).catch(function(){});
+}
+
+// ---- Keyboard ----
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&currentModalId)closeDetailModal();});
+
+// ---- Init ----
+fetchClassificationOptions(); fetchClassifierInfo(); fetchStatus(); fetchPending();
+setInterval(function(){if(document.getElementById('tab-review').classList.contains('active')){fetchPending();fetchStatus();}},30000);
+</script>
+</body>
+</html>

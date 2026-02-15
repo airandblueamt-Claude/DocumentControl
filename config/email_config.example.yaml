@@ -1,0 +1,42 @@
+# Gmail IMAP Connection (receives forwarded emails from GoDaddy)
+server:
+  imap_host: imap.gmail.com
+  imap_port: 993
+
+# Authentication (use Gmail App Password, NOT your regular password)
+auth:
+  auth_method: basic
+  username: "your-email@gmail.com"
+  password: "your-app-password-here"
+
+# Mailbox Settings
+mailbox:
+  email_address: "your-email@gmail.com"
+
+# Folder Configuration
+folders:
+  inbox: "INBOX"
+  processed: "Processed"
+  create_if_missing: true
+
+# Polling Settings
+polling:
+  interval_minutes: 10
+  max_messages_per_run: 50
+
+# Attachment Settings
+attachments:
+  base_path: "Attachments"
+  organization: "by_date"  # Creates YYYY/MM-Month/TRN-YYYY-NNNN/
+  max_size_mb: 25
+  allowed_extensions: [".pdf", ".docx", ".xlsx", ".msg", ".jpg", ".png", ".zip"]
+  skip_signature_attachments: true  # Filter out signature images (logos, banners, social icons)
+
+# Excel Output
+excel:
+  output_path: "logs/correspondence_log.xlsx"
+
+# Logging
+logging:
+  log_file: "logs/email_interface.log"
+  log_level: "INFO"
