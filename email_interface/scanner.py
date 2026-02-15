@@ -50,7 +50,11 @@ def scan_and_queue(base_dir=None):
     # Create classifier with departments from SQLite + optional dashboard override
     departments = tracker.get_departments(active_only=True)
     method_override = tracker.get_setting('classifier_method')
-    classifier = create_classifier(class_cfg, departments=departments, method=method_override)
+    custom_instructions = tracker.get_setting('classifier_instructions')
+    classifier = create_classifier(
+        class_cfg, departments=departments, method=method_override,
+        custom_instructions=custom_instructions,
+    )
 
     max_messages = email_cfg.get('polling', {}).get('max_messages_per_run', 50)
 
@@ -107,8 +111,10 @@ def scan_and_queue(base_dir=None):
                 # Classify
                 result = classifier.classify(msg_data)
 
-                # Store as pending
-                pending_id = tracker.store_pending_email(msg_data, result.to_dict())
+                # Store as pending (include classifier metadata)
+                classification = result.to_dict()
+                classification['classifier_method'] = getattr(classifier, 'name', '')
+                pending_id = tracker.store_pending_email(msg_data, classification)
 
                 # Store attachment blobs
                 for att in msg_data.get('attachments', []):

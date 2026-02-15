@@ -62,11 +62,16 @@ class EmailClassifier(ABC):
 class RuleBasedClassifier(EmailClassifier):
     """Keyword-matching classifier using config patterns and department keywords from SQLite."""
 
-    def __init__(self, config, departments=None):
+    @property
+    def name(self):
+        return "Keywords"
+
+    def __init__(self, config, departments=None, custom_instructions=None):
         """
         Args:
             config: classification_config dict (from YAML)
             departments: list of department dicts [{name, keywords (JSON string), ...}]
+            custom_instructions: ignored for rule-based (kept for uniform signature)
         """
         self.scope_keywords = [kw.lower() for kw in config.get('scope_keywords', [])]
         self.ref_regexes = [re.compile(p) for p in config.get('ref_regexes', [])]
@@ -196,7 +201,7 @@ class RuleBasedClassifier(EmailClassifier):
 class LLMClassifierBase(EmailClassifier):
     """Shared logic for all LLM-based classifiers (prompt building, email summary, fallback)."""
 
-    def __init__(self, config, departments=None):
+    def __init__(self, config, departments=None, custom_instructions=None):
         self._fallback = RuleBasedClassifier(config, departments)
 
         self._scope_keywords = config.get('scope_keywords', [])
@@ -204,9 +209,11 @@ class LLMClassifierBase(EmailClassifier):
         self._discipline_keywords = config.get('discipline_keywords', {})
 
         self._dept_names = []
+        self._dept_list = departments or []
         if departments:
             self._dept_names = [d['name'] for d in departments]
 
+        self._custom_instructions = custom_instructions or ''
         self._max_body_chars = 2000
         self._fallback_on_error = True
 
@@ -265,11 +272,42 @@ class LLMClassifierBase(EmailClassifier):
     def _build_classify_system_prompt(self):
         doc_types = list(self._type_keywords.keys())
         disciplines = list(self._discipline_keywords.keys())
-        return (
-            "You are a document control classifier. Classify the following email.\n\n"
+
+        # Build department descriptions
+        dept_lines = []
+        for dept in self._dept_list:
+            name = dept['name']
+            desc = dept.get('description', '') or ''
+            if not desc:
+                # Fall back to keywords list
+                kw_raw = dept.get('keywords', '[]')
+                if isinstance(kw_raw, str):
+                    try:
+                        kws = json.loads(kw_raw)
+                    except (ValueError, TypeError):
+                        kws = []
+                else:
+                    kws = kw_raw
+                desc = ', '.join(kws) if kws else ''
+            dept_lines.append(f"- {name}: {desc}" if desc else f"- {name}")
+        dept_block = '\n'.join(dept_lines) if dept_lines else 'none'
+
+        prompt = (
+            "You are a document control classifier for a construction/engineering company.\n"
+            "Classify the following email.\n\n"
+        )
+
+        if self._custom_instructions:
+            prompt += (
+                "--- CUSTOM INSTRUCTIONS ---\n"
+                f"{self._custom_instructions}\n"
+                "--- END CUSTOM INSTRUCTIONS ---\n\n"
+            )
+
+        prompt += (
             f"Valid document types: {', '.join(doc_types)}\n"
-            f"Valid disciplines: {', '.join(disciplines)}\n"
-            f"Valid departments: {', '.join(self._dept_names) if self._dept_names else 'none'}\n\n"
+            f"Valid disciplines: {', '.join(disciplines)}\n\n"
+            f"Departments:\n{dept_block}\n\n"
             "Reply with ONLY valid JSON:\n"
             "{\n"
             '  "doc_type": "one of the valid types above",\n'
@@ -280,6 +318,7 @@ class LLMClassifierBase(EmailClassifier):
             '  "confidence": 0.0 to 1.0\n'
             "}"
         )
+        return prompt
 
     def _parse_scope_response(self, text):
         data = json.loads(text)
@@ -309,8 +348,12 @@ class LLMClassifierBase(EmailClassifier):
 class ClaudeAPIClassifier(LLMClassifierBase):
     """AI-powered classifier using the Claude API with rule-based fallback."""
 
-    def __init__(self, config, departments=None):
-        super().__init__(config, departments)
+    @property
+    def name(self):
+        return "Claude"
+
+    def __init__(self, config, departments=None, custom_instructions=None):
+        super().__init__(config, departments, custom_instructions)
         import anthropic as _anthropic
         self._anthropic = _anthropic
 
@@ -366,8 +409,12 @@ class ClaudeAPIClassifier(LLMClassifierBase):
 class GeminiClassifier(LLMClassifierBase):
     """AI-powered classifier using Google Gemini (free tier) with rule-based fallback."""
 
-    def __init__(self, config, departments=None):
-        super().__init__(config, departments)
+    @property
+    def name(self):
+        return "Gemini"
+
+    def __init__(self, config, departments=None, custom_instructions=None):
+        super().__init__(config, departments, custom_instructions)
         from google import genai as _genai
         self._genai = _genai
 
@@ -456,8 +503,12 @@ class GeminiClassifier(LLMClassifierBase):
 class GroqClassifier(LLMClassifierBase):
     """AI-powered classifier using Groq (free tier Llama) with rule-based fallback."""
 
-    def __init__(self, config, departments=None):
-        super().__init__(config, departments)
+    @property
+    def name(self):
+        return "Groq"
+
+    def __init__(self, config, departments=None, custom_instructions=None):
+        super().__init__(config, departments, custom_instructions)
         import groq as _groq
         self._groq = _groq
 
@@ -529,11 +580,18 @@ class FallbackChainClassifier(EmailClassifier):
             classifiers: ordered list of EmailClassifier instances
         """
         self._classifiers = classifiers
+        self._last_used_name = 'Unknown'
+
+    @property
+    def name(self):
+        return self._last_used_name
 
     def is_in_scope(self, msg_data):
         for clf in self._classifiers:
             try:
-                return clf.is_in_scope(msg_data)
+                result = clf.is_in_scope(msg_data)
+                self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
+                return result
             except Exception as exc:
                 logger.warning("FallbackChain: %s.is_in_scope failed (%s), trying next",
                                clf.__class__.__name__, exc)
@@ -543,7 +601,9 @@ class FallbackChainClassifier(EmailClassifier):
     def classify(self, msg_data):
         for clf in self._classifiers:
             try:
-                return clf.classify(msg_data)
+                result = clf.classify(msg_data)
+                self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
+                return result
             except Exception as exc:
                 logger.warning("FallbackChain: %s.classify failed (%s), trying next",
                                clf.__class__.__name__, exc)
@@ -555,7 +615,7 @@ class FallbackChainClassifier(EmailClassifier):
 # Factory
 # ---------------------------------------------------------------------------
 
-def create_classifier(config, departments=None, method=None):
+def create_classifier(config, departments=None, method=None, custom_instructions=None):
     """Factory function to create the appropriate classifier.
 
     Args:
@@ -563,32 +623,33 @@ def create_classifier(config, departments=None, method=None):
         departments: list of department dicts from SQLite
         method: 'rule_based', 'claude_api', 'gemini', 'groq', or 'auto'.
                 Defaults to config value.
+        custom_instructions: optional string with user-defined AI instructions
     """
     if method is None:
         method = config.get('classifier', {}).get('method', 'rule_based')
 
     if method == 'rule_based':
-        return RuleBasedClassifier(config, departments)
+        return RuleBasedClassifier(config, departments, custom_instructions)
     elif method == 'claude_api':
-        return ClaudeAPIClassifier(config, departments)
+        return ClaudeAPIClassifier(config, departments, custom_instructions)
     elif method == 'gemini':
-        return GeminiClassifier(config, departments)
+        return GeminiClassifier(config, departments, custom_instructions)
     elif method == 'groq':
-        return GroqClassifier(config, departments)
+        return GroqClassifier(config, departments, custom_instructions)
     elif method == 'auto':
-        return _build_auto_chain(config, departments)
+        return _build_auto_chain(config, departments, custom_instructions)
     else:
         raise ValueError(f"Unknown classifier method: {method}")
 
 
-def _build_auto_chain(config, departments):
+def _build_auto_chain(config, departments, custom_instructions=None):
     """Build a FallbackChainClassifier from whichever API keys are present."""
     chain = []
 
     # Try Gemini first (free tier)
     if os.environ.get('GEMINI_API_KEY'):
         try:
-            chain.append(GeminiClassifier(config, departments))
+            chain.append(GeminiClassifier(config, departments, custom_instructions))
             logger.info("Auto classifier: Gemini enabled")
         except Exception as exc:
             logger.warning("Auto classifier: Gemini init failed (%s)", exc)
@@ -596,7 +657,7 @@ def _build_auto_chain(config, departments):
     # Then Groq (free tier)
     if os.environ.get('GROQ_API_KEY'):
         try:
-            chain.append(GroqClassifier(config, departments))
+            chain.append(GroqClassifier(config, departments, custom_instructions))
             logger.info("Auto classifier: Groq enabled")
         except Exception as exc:
             logger.warning("Auto classifier: Groq init failed (%s)", exc)
@@ -604,13 +665,13 @@ def _build_auto_chain(config, departments):
     # Then Claude (paid)
     if os.environ.get('ANTHROPIC_API_KEY'):
         try:
-            chain.append(ClaudeAPIClassifier(config, departments))
+            chain.append(ClaudeAPIClassifier(config, departments, custom_instructions))
             logger.info("Auto classifier: Claude API enabled")
         except Exception as exc:
             logger.warning("Auto classifier: Claude API init failed (%s)", exc)
 
     # Always end with rule-based
-    chain.append(RuleBasedClassifier(config, departments))
+    chain.append(RuleBasedClassifier(config, departments, custom_instructions))
     logger.info("Auto classifier: RuleBasedClassifier as final fallback")
 
     if len(chain) == 1:

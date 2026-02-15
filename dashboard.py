@@ -308,6 +308,37 @@ def api_set_classifier_method():
     })
 
 
+@app.route('/api/settings/ai-instructions', methods=['GET'])
+def api_get_ai_instructions():
+    """Return current custom AI instructions."""
+    tracker = _get_tracker()
+    try:
+        instructions = tracker.get_setting('classifier_instructions') or ''
+        # Get updated_at from settings table
+        conn = sqlite3.connect(_get_db_path())
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT updated_at FROM settings WHERE key = 'classifier_instructions'")
+        row = cur.fetchone()
+        conn.close()
+        updated_at = row['updated_at'] if row else None
+        return jsonify({'instructions': instructions, 'updated_at': updated_at})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/ai-instructions', methods=['PUT'])
+def api_set_ai_instructions():
+    """Save custom AI instructions."""
+    data = request.get_json(silent=True) or {}
+    instructions = data.get('instructions', '').strip()
+    tracker = _get_tracker()
+    try:
+        tracker.set_setting('classifier_instructions', instructions)
+        return jsonify({'message': 'AI instructions saved', 'instructions': instructions})
+    finally:
+        tracker.close()
+
+
 @app.route('/api/home-stats')
 def api_home_stats():
     """Return summary stats for the home page."""
@@ -743,12 +774,13 @@ def api_departments_add():
     data = request.get_json(silent=True) or {}
     name = data.get('name', '').strip()
     keywords = data.get('keywords', [])
+    description = data.get('description', '').strip()
     if not name:
         return jsonify({'error': 'Name is required'}), 400
 
     tracker = _get_tracker()
     try:
-        dept_id = tracker.add_department(name, keywords)
+        dept_id = tracker.add_department(name, keywords, description=description)
         return jsonify({'id': dept_id, 'message': f'Department "{name}" added'}), 201
     except sqlite3.IntegrityError:
         return jsonify({'error': f'Department "{name}" already exists'}), 409
@@ -766,6 +798,7 @@ def api_departments_update(dept_id):
             name=data.get('name'),
             keywords=data.get('keywords'),
             is_active=data.get('is_active'),
+            description=data.get('description'),
         )
         return jsonify({'message': 'Updated'})
     except sqlite3.IntegrityError:

@@ -552,6 +552,49 @@
         .clf-select:focus { border-color: var(--primary); outline: none; }
         .clf-source { font-size: 10px; color: var(--text-light); font-weight: 500; }
         .clf-chain { font-size: 11px; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
+
+        /* AI classifier badges on emails */
+        .ai-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 10px; font-weight: 600; padding: 2px 7px;
+            border-radius: 4px; white-space: nowrap;
+        }
+        .ai-badge .ai-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+        .ai-badge.conf-high { background: #dcfce7; color: #166534; }
+        .ai-badge.conf-high .ai-dot { background: #16a34a; }
+        .ai-badge.conf-mid { background: #fef3c7; color: #92400e; }
+        .ai-badge.conf-mid .ai-dot { background: #d97706; }
+        .ai-badge.conf-low { background: #fee2e2; color: #991b1b; }
+        .ai-badge.conf-low .ai-dot { background: #dc2626; }
+        .ai-badge.conf-none { background: #f1f5f9; color: var(--text-muted); }
+        .ai-badge.conf-none .ai-dot { background: var(--text-light); }
+
+        /* AI Instructions section */
+        .ai-instructions { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+        .ai-instructions-header {
+            display: flex; align-items: center; justify-content: space-between;
+            cursor: pointer; user-select: none;
+        }
+        .ai-instructions-header .ctrl-label { margin: 0; }
+        .ai-instructions-toggle { font-size: 14px; color: var(--text-light); transition: transform .2s; }
+        .ai-instructions-toggle.open { transform: rotate(180deg); }
+        .ai-instructions-body { display: none; margin-top: 6px; }
+        .ai-instructions-body.open { display: block; }
+        .ai-textarea {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 12px; font-family: inherit;
+            resize: vertical; min-height: 60px; transition: border-color .15s;
+        }
+        .ai-textarea:focus { border-color: var(--primary); outline: none; }
+        .ai-textarea::placeholder { color: var(--text-light); }
+        .ai-instructions-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; gap: 8px; }
+        .ai-instructions-meta { font-size: 10px; color: var(--text-light); }
+
+        /* Department description */
+        .dept-desc {
+            font-size: 11px; color: var(--text-muted); margin-top: 2px;
+            font-style: italic; word-break: break-word;
+        }
     </style>
 </head>
 <body>
@@ -676,6 +719,20 @@
                     <div class="clf-source" id="classifierSource"></div>
                     <div class="clf-chain" id="classifierChain"></div>
                     <div class="clf-keys" id="classifierKeys"></div>
+                    <div class="ai-instructions">
+                        <div class="ai-instructions-header" onclick="toggleAiInstructions()">
+                            <span class="ctrl-label">AI Instructions</span>
+                            <span class="ai-instructions-toggle" id="aiInstrToggle">&#9660;</span>
+                        </div>
+                        <div class="ai-instructions-body" id="aiInstrBody">
+                            <textarea class="ai-textarea" id="aiInstructionsText" rows="4"
+                                placeholder="Add custom instructions... e.g. 'Emails about datacenter relocation go to Networking department. MoM emails are Minutes of Meeting type.'"></textarea>
+                            <div class="ai-instructions-actions">
+                                <span class="ai-instructions-meta" id="aiInstrMeta"></span>
+                                <button class="btn btn-primary btn-sm" onclick="saveAiInstructions()">Save Instructions</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -739,6 +796,9 @@
                     <div class="form-row">
                         <div class="form-group" style="max-width:180px"><label>Name</label><input type="text" id="deptName" placeholder="e.g. MEP"></div>
                         <div class="form-group"><label>Keywords (comma-separated)</label><input type="text" id="deptKeywords" placeholder="e.g. mechanical, plumbing"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Description / Scope</label><input type="text" id="deptDescription" placeholder="Describe what this department handles..."></div>
                     </div>
                     <button class="btn btn-primary" onclick="addDepartment()" style="align-self:flex-end">Add Department</button>
                 </div>
@@ -812,6 +872,21 @@ function fmtRecipients(jsonStr) {
 function fmtFileSize(b) {
     if(!b||b===0) return ''; if(b<1024) return b+' B';
     if(b<1048576) return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB';
+}
+
+// ---- AI Badge Helper ----
+function renderAiBadge(method, confidence) {
+    if (!method) return '';
+    var pct = confidence != null ? Math.round(confidence * 100) : null;
+    var cls = 'conf-none';
+    if (pct !== null) {
+        if (pct >= 80) cls = 'conf-high';
+        else if (pct >= 50) cls = 'conf-mid';
+        else cls = 'conf-low';
+    }
+    var label = esc(method);
+    if (pct !== null) label += ' \u00b7 ' + pct + '%';
+    return '<span class="ai-badge ' + cls + '"><span class="ai-dot"></span>' + label + '</span>';
 }
 
 // ---- Pagination ----
@@ -948,6 +1023,7 @@ function renderPendingTable() {
         if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
         if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
         if(e.department) html+='<span class="card-tag">'+esc(e.department)+'</span>';
+        html+=renderAiBadge(e.classifier_method, e.confidence);
         html+='</div>';
         html+='<div class="card-actions">';
         html+='<button class="btn btn-success btn-sm" onclick="approveOne('+e.id+')">Approve</button>';
@@ -961,7 +1037,7 @@ function renderPendingTable() {
     html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
         '<th style="width:30px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>'+
         '<th style="width:30px">#</th><th>Date</th><th>From</th><th>Subject</th><th>Att.</th>'+
-        '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Actions</th>'+
+        '<th>Type</th><th>Discipline</th><th>Dept.</th><th>AI</th><th>Actions</th>'+
         '</tr></thead><tbody>';
     for(var i=0;i<pg.items.length;i++){
         var e=pg.items[i], idx=pg.page*PAGE_SIZE+i+1;
@@ -978,6 +1054,7 @@ function renderPendingTable() {
             '<td><select class="inline-select" data-id="'+e.id+'" data-field="doc_type">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></td>'+
             '<td><select class="inline-select" data-id="'+e.id+'" data-field="discipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></td>'+
             '<td><select class="inline-select" data-id="'+e.id+'" data-field="department"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></td>'+
+            '<td>'+renderAiBadge(e.classifier_method, e.confidence)+'</td>'+
             '<td class="col-actions"><div class="row-actions">'+
                 '<button class="btn btn-success btn-sm" onclick="approveOne('+e.id+')">Approve</button>'+
                 '<button class="btn btn-danger btn-sm" onclick="rejectOne('+e.id+')">Reject</button>'+
@@ -1096,6 +1173,9 @@ function openDetailModal(id){
                 var sc=a.is_signature?' signature':'', st=a.is_signature?' <span class="tag-signature">Signature</span>':'';
                 h+='<div class="modal-att-item'+sc+'"><a href="/api/pending/'+id+'/attachments/'+a.id+'" target="_blank">'+esc(a.filename)+'</a><span class="att-size">'+fmtFileSize(a.size)+'</span>'+st+'</div>';
             }); h+='</div></div>';
+        }
+        if(e.classifier_method){
+            h+='<div class="modal-field"><div class="modal-field-label">Classified By</div><div class="modal-field-value">'+renderAiBadge(e.classifier_method, e.confidence)+'</div></div>';
         }
         h+='<div class="modal-fields-row">';
         h+='<div class="modal-field"><div class="modal-field-label">Document Type</div><select class="modal-select" id="modalDocType">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></div>';
@@ -1218,26 +1298,30 @@ function fetchDepartments(){
             var sc=dp.is_active?'active-badge':'inactive-badge',st=dp.is_active?'Active':'Inactive',tt=dp.is_active?'Deactivate':'Activate';
             html+='<div class="email-card">';
             html+='<div class="card-row"><div style="flex:1"><strong>'+esc(dp.name)+'</strong> <span class="'+sc+'">'+st+'</span></div></div>';
+            if(dp.description) html+='<div class="dept-desc">'+esc(dp.description)+'</div>';
             if(kws.length) html+='<div class="card-tags">'+kws.map(function(k){return '<span class="card-tag">'+esc(k)+'</span>';}).join('')+'</div>';
             html+='<div class="card-actions">';
+            html+='<button class="btn btn-ghost btn-sm" onclick="editDeptDesc('+dp.id+',this)">Edit Scope</button>';
             html+='<button class="btn btn-ghost btn-sm" onclick="toggleDept('+dp.id+','+(dp.is_active?'false':'true')+')">'+tt+'</button>';
             html+='<button class="btn btn-danger btn-sm" onclick="deleteDept('+dp.id+',\''+esc(dp.name)+'\')">Delete</button>';
             html+='</div></div>';
         }
         html+='</div>';
         // Desktop table
-        html+='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Keywords</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+        html+='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Description / Scope</th><th>Keywords</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
         for(var i=0;i<depts.length;i++){
             var dp=depts[i],kws=[];try{kws=JSON.parse(dp.keywords||'[]');}catch(e){}
             var kt=kws.map(function(k){return '<span class="tag">'+esc(k)+'</span>';}).join(' ');
             var sc=dp.is_active?'active-badge':'inactive-badge',st=dp.is_active?'Active':'Inactive',tt=dp.is_active?'Deactivate':'Activate';
-            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(dp.name)+'</strong></td><td>'+(kt||'<span style="color:var(--text-light)">none</span>')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost btn-sm" onclick="toggleDept('+dp.id+','+(dp.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteDept('+dp.id+',\''+esc(dp.name)+'\')">Delete</button></div></td></tr>';
+            var descHtml=dp.description?'<span class="dept-desc" style="font-style:normal">'+esc(dp.description)+'</span>':'<span style="color:var(--text-light)">--</span>';
+            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(dp.name)+'</strong></td><td>'+descHtml+'</td><td>'+(kt||'<span style="color:var(--text-light)">none</span>')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost btn-sm" onclick="editDeptDesc('+dp.id+',this)">Scope</button><button class="btn btn-ghost btn-sm" onclick="toggleDept('+dp.id+','+(dp.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteDept('+dp.id+',\''+esc(dp.name)+'\')">Delete</button></div></td></tr>';
         }
         html+='</tbody></table></div>';
         w.innerHTML=html;
     }).catch(function(){});
 }
-function addDepartment(){var n=document.getElementById('deptName').value.trim(),k=document.getElementById('deptKeywords').value.trim();if(!n){showToast('Name required','error');return;}var kw=k?k.split(',').map(function(s){return s.trim();}).filter(Boolean):[];fetch('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,keywords:kw})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('deptName').value='';document.getElementById('deptKeywords').value='';fetchDepartments();fetchClassificationOptions();}).catch(function(){showToast('Failed','error');});}
+function addDepartment(){var n=document.getElementById('deptName').value.trim(),k=document.getElementById('deptKeywords').value.trim(),desc=document.getElementById('deptDescription').value.trim();if(!n){showToast('Name required','error');return;}var kw=k?k.split(',').map(function(s){return s.trim();}).filter(Boolean):[];fetch('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,keywords:kw,description:desc})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('deptName').value='';document.getElementById('deptKeywords').value='';document.getElementById('deptDescription').value='';fetchDepartments();fetchClassificationOptions();}).catch(function(){showToast('Failed','error');});}
+function editDeptDesc(id,btn){var desc=prompt('Enter department scope/description:');if(desc===null)return;fetch('/api/departments/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('Description updated','success');fetchDepartments();}).catch(function(){showToast('Failed','error');});}
 function toggleDept(id,a){fetch('/api/departments/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active:a})}).then(function(r){return r.json();}).then(function(){fetchDepartments();fetchClassificationOptions();}).catch(function(){});}
 function deleteDept(id,n){if(!confirm('Delete "'+n+'"?'))return;fetch('/api/departments/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){showToast('Deleted','info');fetchDepartments();fetchClassificationOptions();}).catch(function(){});}
 
@@ -1308,6 +1392,30 @@ function changeClassifierMethod(){
         document.getElementById('classifierSource').textContent='Set from dashboard';
         document.getElementById('classifierChain').textContent=d.active_label;
     }).catch(function(){showToast('Failed to update classifier','error');});
+}
+
+// ---- AI Instructions ----
+function toggleAiInstructions(){
+    var body=document.getElementById('aiInstrBody'),tog=document.getElementById('aiInstrToggle');
+    body.classList.toggle('open'); tog.classList.toggle('open');
+    if(body.classList.contains('open')) fetchAiInstructions();
+}
+function fetchAiInstructions(){
+    fetch('/api/settings/ai-instructions').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('aiInstructionsText').value=d.instructions||'';
+        var meta=document.getElementById('aiInstrMeta');
+        if(d.updated_at) meta.textContent='Last saved: '+fmtTime(d.updated_at);
+        else meta.textContent='Not set yet';
+    }).catch(function(){});
+}
+function saveAiInstructions(){
+    var text=document.getElementById('aiInstructionsText').value;
+    fetch('/api/settings/ai-instructions',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instructions:text})})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('AI instructions saved','success');
+        document.getElementById('aiInstrMeta').textContent='Last saved: '+fmtTime(new Date().toISOString());
+    }).catch(function(){showToast('Failed to save instructions','error');});
 }
 
 // ---- Home Stats ----

@@ -98,6 +98,9 @@ _MIGRATIONS = [
     ("processed_messages", "department", "TEXT"),
     ("processed_messages", "response_required", "INTEGER DEFAULT 0"),
     ("processed_messages", "references_json", "TEXT"),
+    ("pending_emails", "classifier_method", "TEXT"),
+    ("pending_emails", "confidence", "REAL"),
+    ("departments", "description", "TEXT"),
 ]
 
 
@@ -217,8 +220,8 @@ class ProcessingTracker:
                (message_id, status, scanned_at, sender, sender_name,
                 to_recipients, cc_recipients, subject, email_date, body,
                 doc_type, discipline, department, response_required,
-                references_json, attachment_count)
-               VALUES (?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                references_json, attachment_count, classifier_method, confidence)
+               VALUES (?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_data.get('message_id', ''),
                 datetime.now().isoformat(),
@@ -235,6 +238,8 @@ class ProcessingTracker:
                 1 if classification.get('response_required') else 0,
                 refs_json,
                 len(msg_data.get('attachments', [])),
+                classification.get('classifier_method', ''),
+                classification.get('confidence'),
             ),
         )
         self._conn.commit()
@@ -259,7 +264,8 @@ class ProcessingTracker:
             """SELECT id, message_id, status, scanned_at, sender, sender_name,
                       to_recipients, cc_recipients, subject, email_date,
                       doc_type, discipline, department, response_required,
-                      references_json, attachment_count, transmittal_no
+                      references_json, attachment_count, transmittal_no,
+                      classifier_method, confidence
                FROM pending_emails WHERE status = ?
                ORDER BY scanned_at DESC LIMIT ?""",
             (status, limit),
@@ -432,18 +438,18 @@ class ProcessingTracker:
         self._conn.row_factory = None
         return rows
 
-    def add_department(self, name, keywords=None):
+    def add_department(self, name, keywords=None, description=None):
         """Add a new department. keywords is a list of strings."""
         kw_json = json.dumps(keywords or [])
         now = datetime.now().isoformat()
         cur = self._conn.execute(
-            "INSERT INTO departments (name, keywords, is_active, created_at, updated_at) VALUES (?, ?, 1, ?, ?)",
-            (name, kw_json, now, now),
+            "INSERT INTO departments (name, keywords, description, is_active, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
+            (name, kw_json, description or '', now, now),
         )
         self._conn.commit()
         return cur.lastrowid
 
-    def update_department(self, dept_id, name=None, keywords=None, is_active=None):
+    def update_department(self, dept_id, name=None, keywords=None, is_active=None, description=None):
         """Update a department."""
         updates = []
         params = []
@@ -453,6 +459,9 @@ class ProcessingTracker:
         if keywords is not None:
             updates.append("keywords = ?")
             params.append(json.dumps(keywords))
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
         if is_active is not None:
             updates.append("is_active = ?")
             params.append(1 if is_active else 0)
