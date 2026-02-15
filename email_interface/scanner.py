@@ -104,6 +104,13 @@ def scan_and_queue(base_dir=None):
                 # Scope check
                 if not classifier.is_in_scope(msg_data):
                     logger.info("Out of scope: %s", msg_data.get('subject', ''))
+                    oos_classification = {
+                        'doc_type': '', 'discipline': '', 'department': '',
+                        'response_required': False, 'references': [],
+                        'confidence': None,
+                        'classifier_method': getattr(classifier, 'name', ''),
+                    }
+                    tracker.store_pending_email(msg_data, oos_classification, status='out_of_scope')
                     imap_client.mark_as_read(msg_id)
                     counts['out_of_scope'] += 1
                     continue

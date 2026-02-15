@@ -438,9 +438,10 @@ def api_log():
 
 @app.route('/api/pending')
 def api_pending():
+    status = request.args.get('status', 'pending_review')
     tracker = _get_tracker()
     try:
-        pending = tracker.get_pending_emails(status='pending_review')
+        pending = tracker.get_pending_emails(status=status)
         stats = tracker.get_pending_stats()
         # Enrich with contact info
         for email in pending:
@@ -593,6 +594,18 @@ def api_reject(pending_id):
     try:
         tracker.reject_pending_email(pending_id)
         return jsonify({'message': 'Rejected'})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    finally:
+        tracker.close()
+
+
+@app.route('/api/pending/<int:pending_id>/move-to-review', methods=['POST'])
+def api_move_to_review(pending_id):
+    tracker = _get_tracker()
+    try:
+        tracker.move_to_review(pending_id)
+        return jsonify({'message': 'Moved to review'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     finally:

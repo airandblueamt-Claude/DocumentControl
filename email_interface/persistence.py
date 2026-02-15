@@ -206,7 +206,7 @@ class ProcessingTracker:
         )
         return cur.fetchone() is not None
 
-    def store_pending_email(self, msg_data, classification):
+    def store_pending_email(self, msg_data, classification, status='pending_review'):
         """Store a scanned email as pending review. Returns the pending email id."""
         to_json = json.dumps(msg_data.get('to', []), default=str)
         cc_json = json.dumps(msg_data.get('cc', []), default=str)
@@ -221,9 +221,10 @@ class ProcessingTracker:
                 to_recipients, cc_recipients, subject, email_date, body,
                 doc_type, discipline, department, response_required,
                 references_json, attachment_count, classifier_method, confidence)
-               VALUES (?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_data.get('message_id', ''),
+                status,
                 datetime.now().isoformat(),
                 msg_data.get('sender', ''),
                 msg_data.get('sender_name', ''),
@@ -422,7 +423,22 @@ class ProcessingTracker:
             'pending_review': stats.get('pending_review', 0),
             'approved': stats.get('approved', 0),
             'rejected': stats.get('rejected', 0),
+            'out_of_scope': stats.get('out_of_scope', 0),
         }
+
+    def move_to_review(self, pending_id):
+        """Move an out-of-scope email back to pending_review."""
+        pe = self.get_pending_email(pending_id)
+        if not pe:
+            raise ValueError(f"Pending email #{pending_id} not found")
+        if pe['status'] != 'out_of_scope':
+            raise ValueError(f"Email #{pending_id} is {pe['status']}, not out_of_scope")
+        self._conn.execute(
+            "UPDATE pending_emails SET status = 'pending_review', decided_at = NULL WHERE id = ?",
+            (pending_id,)
+        )
+        self._conn.commit()
+        logger.info("Moved to review: pending #%d", pending_id)
 
     # --- Departments ---
 

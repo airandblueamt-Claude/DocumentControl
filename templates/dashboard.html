@@ -222,6 +222,38 @@
             font-size: 10px; font-weight: 600; padding: 2px 8px;
             border-radius: 4px; background: #f1f5f9; color: var(--text-muted);
         }
+
+        /* ---- Filter Pills ---- */
+        .filter-pills {
+            display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+        }
+        .filter-pill {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 6px 12px; border-radius: 20px;
+            font-size: 12px; font-weight: 600;
+            border: 1px solid var(--border); background: #fff;
+            color: var(--text-muted); cursor: pointer;
+            transition: all .15s; white-space: nowrap;
+        }
+        .filter-pill:hover { border-color: var(--primary); color: var(--text); }
+        .filter-pill.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .filter-pill .pill-count {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 18px; height: 18px; line-height: 18px;
+            font-size: 10px; font-weight: 700;
+            border-radius: 9px; padding: 0 5px;
+            background: rgba(0,0,0,0.08);
+        }
+        .filter-pill.active .pill-count { background: rgba(255,255,255,0.25); }
+        .filter-pill.has-count .pill-count { background: var(--danger); color: #fff; }
+        .filter-pill.active.has-count .pill-count { background: rgba(255,255,255,0.3); }
+        .btn-move-review {
+            background: var(--purple); color: #fff;
+            border: none; padding: 5px 10px; border-radius: 6px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            transition: all .15s;
+        }
+        .btn-move-review:hover { opacity: 0.85; }
         .card-actions { display: flex; gap: 6px; }
         .card-check { display: flex; align-items: center; padding-right: 8px; }
 
@@ -628,7 +660,7 @@
                 <button class="modal-close" onclick="closeDetailModal()">&times;</button>
             </div>
             <div class="modal-body" id="modalBody"></div>
-            <div class="modal-footer">
+            <div class="modal-footer" id="modalFooter">
                 <button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>
                 <button class="btn btn-danger" onclick="modalReject()">Reject</button>
                 <button class="btn btn-success" onclick="modalApprove()">Approve</button>
@@ -739,7 +771,11 @@
             <div class="table-card">
                 <div class="table-toolbar">
                     <div class="toolbar-top">
-                        <h2>Pending Review</h2>
+                        <div class="filter-pills">
+                            <button class="filter-pill active" id="pillReview" onclick="setPendingFilter('pending_review')">For Review <span class="pill-count" id="pillReviewCount">0</span></button>
+                            <button class="filter-pill" id="pillOos" onclick="setPendingFilter('out_of_scope')">Out of Scope <span class="pill-count" id="pillOosCount">0</span></button>
+                            <button class="filter-pill" id="pillRejected" onclick="setPendingFilter('rejected')">Rejected <span class="pill-count" id="pillRejectedCount">0</span></button>
+                        </div>
                         <div class="toolbar-controls">
                             <div class="bulk-bar" id="bulkActions" style="display:none">
                                 <span class="bulk-count" id="bulkCount">0</span>
@@ -835,6 +871,7 @@ var classificationOptions = { doc_types: [], disciplines: [], departments: [] };
 var pendingEmails = [];
 var processedEmails = [];
 var selectedIds = new Set();
+var pendingStatusFilter = 'pending_review';
 var viewModes = { pending: 'compact', processed: 'compact' };
 var currentModalId = null;
 var modalBodyFull = '', modalBodySummary = '', showingFullBody = false;
@@ -969,12 +1006,42 @@ function startScanPolling(){
 }
 
 // ---- Review Queue ----
+function setPendingFilter(status) {
+    pendingStatusFilter = status;
+    selectedIds.clear();
+    document.querySelectorAll('.filter-pill').forEach(function(p){ p.classList.remove('active'); });
+    var pillMap = { 'pending_review': 'pillReview', 'out_of_scope': 'pillOos', 'rejected': 'pillRejected' };
+    var pill = document.getElementById(pillMap[status]);
+    if (pill) pill.classList.add('active');
+    // Show/hide bulk actions based on filter
+    var bulkBar = document.getElementById('bulkActions');
+    if (bulkBar) bulkBar.style.display = 'none';
+    fetchPending();
+}
+function updatePillCounts(stats) {
+    var pills = [
+        { id: 'pillReviewCount', key: 'pending_review' },
+        { id: 'pillOosCount', key: 'out_of_scope' },
+        { id: 'pillRejectedCount', key: 'rejected' },
+    ];
+    pills.forEach(function(p) {
+        var el = document.getElementById(p.id);
+        var count = stats[p.key] || 0;
+        if (el) el.textContent = count;
+        var pill = el ? el.parentElement : null;
+        if (pill) {
+            if (count > 0) pill.classList.add('has-count');
+            else pill.classList.remove('has-count');
+        }
+    });
+}
 function fetchPending() {
-    fetch('/api/pending').then(function(r){return r.json();}).then(function(data){
+    fetch('/api/pending?status=' + encodeURIComponent(pendingStatusFilter)).then(function(r){return r.json();}).then(function(data){
         pendingEmails=data.emails||[];
         var stats=data.stats||{}, count=stats.pending_review||0;
         var badge=document.getElementById('pendingBadge');
         badge.textContent=count; badge.className='tab-badge'+(count===0?' zero':'');
+        updatePillCounts(stats);
         pendingPage=0; renderPendingTable();
     }).catch(function(){});
 }
@@ -994,8 +1061,14 @@ function setPendingPage(p) { pendingPage=p; renderPendingTable(); }
 function renderPendingTable() {
     var wrap=document.getElementById('pendingTableWrap');
     var filtered=getFilteredPending();
+    var isReview = pendingStatusFilter === 'pending_review';
+    var isOos = pendingStatusFilter === 'out_of_scope';
+    var isRejected = pendingStatusFilter === 'rejected';
+    var emptyMsg = isReview ? 'No emails pending review. Click "Scan Now" to check.'
+                 : isOos ? 'No out-of-scope emails found.'
+                 : 'No rejected emails.';
     if(!filtered.length){
-        wrap.innerHTML='<div class="empty-state">'+(pendingEmails.length?'No matches found.':'No emails pending review. Click "Scan Now" to check.')+'</div>';
+        wrap.innerHTML='<div class="empty-state">'+(pendingEmails.length?'No matches found.':emptyMsg)+'</div>';
         document.getElementById('bulkActions').style.display='none'; return;
     }
     var pg=paginate(filtered, pendingPage);
@@ -1009,13 +1082,13 @@ function renderPendingTable() {
         var senderBadge=e.sender_known?'<span class="sender-known">Known</span>':'<span class="sender-unknown">New</span>';
         html+='<div class="email-card">';
         html+='<div class="card-row">';
-        html+='<div class="card-check"><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></div>';
+        if(isReview) html+='<div class="card-check"><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></div>';
         html+='<div style="flex:1;min-width:0">';
         html+='<div class="card-subject" onclick="openDetailModal('+e.id+')">'+esc(e.subject||'(no subject)')+'</div>';
         html+='<div class="card-meta">';
         html+='<span>'+esc(e.sender_name||e.sender)+senderBadge+'</span>';
-        html+='<span>'+fmtTime(e.scanned_at)+'</span>';
-        if(e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
+        html+='<span>'+fmtTime(isRejected && e.decided_at ? e.decided_at : e.scanned_at)+'</span>';
+        if(isReview && e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
         html+='</div>';
         html+='</div></div>';
         html+='<div class="card-row">';
@@ -1026,58 +1099,75 @@ function renderPendingTable() {
         html+=renderAiBadge(e.classifier_method, e.confidence);
         html+='</div>';
         html+='<div class="card-actions">';
-        html+='<button class="btn btn-success btn-sm" onclick="approveOne('+e.id+')">Approve</button>';
-        html+='<button class="btn btn-danger btn-sm" onclick="rejectOne('+e.id+')">Reject</button>';
+        if(isReview){
+            html+='<button class="btn btn-success btn-sm" onclick="approveOne('+e.id+')">Approve</button>';
+            html+='<button class="btn btn-danger btn-sm" onclick="rejectOne('+e.id+')">Reject</button>';
+        } else if(isOos){
+            html+='<button class="btn-move-review" onclick="moveToReview('+e.id+')">Move to Review</button>';
+        }
         html+='</div></div></div>';
     }
     html += '</div>';
 
     // Desktop table layout
     var exp=viewModes.pending==='expanded'?' table-expanded':'';
-    html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
-        '<th style="width:30px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>'+
-        '<th style="width:30px">#</th><th>Date</th><th>From</th><th>Subject</th><th>Att.</th>'+
-        '<th>Type</th><th>Discipline</th><th>Dept.</th><th>AI</th><th>Actions</th>'+
-        '</tr></thead><tbody>';
+    html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>';
+    if(isReview) html+='<th style="width:30px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>';
+    html+='<th style="width:30px">#</th><th>Date</th><th>From</th><th>Subject</th>';
+    if(isReview) html+='<th>Att.</th><th>Type</th><th>Discipline</th><th>Dept.</th>';
+    html+='<th>AI</th>';
+    if(!isRejected) html+='<th>Actions</th>';
+    html+='</tr></thead><tbody>';
     for(var i=0;i<pg.items.length;i++){
         var e=pg.items[i], idx=pg.page*PAGE_SIZE+i+1;
         var checked=selectedIds.has(e.id)?' checked':'';
         var senderBadge=e.sender_known?'<span class="sender-known">Known</span>':'<span class="sender-unknown">Unknown</span>';
         var senderCompany=e.sender_company?'<span class="sender-company">'+esc(e.sender_company)+'</span>':'';
-        html+='<tr>'+
-            '<td><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></td>'+
-            '<td class="col-num">'+idx+'</td>'+
-            '<td style="white-space:nowrap">'+fmtTime(e.scanned_at)+'</td>'+
+        var dateCol = isRejected && e.decided_at ? e.decided_at : e.scanned_at;
+        html+='<tr>';
+        if(isReview) html+='<td><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></td>';
+        html+='<td class="col-num">'+idx+'</td>'+
+            '<td style="white-space:nowrap">'+fmtTime(dateCol)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+esc(e.sender_name||e.sender)+senderBadge+senderCompany+'</td>'+
-            '<td class="col-subject"><span class="subject-link" onclick="openDetailModal('+e.id+')">'+esc(e.subject)+'</span></td>'+
-            '<td id="att-cell-'+e.id+'">'+(e.attachment_count||0)+'</td>'+
-            '<td><select class="inline-select" data-id="'+e.id+'" data-field="doc_type">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></td>'+
-            '<td><select class="inline-select" data-id="'+e.id+'" data-field="discipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></td>'+
-            '<td><select class="inline-select" data-id="'+e.id+'" data-field="department"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></td>'+
-            '<td>'+renderAiBadge(e.classifier_method, e.confidence)+'</td>'+
-            '<td class="col-actions"><div class="row-actions">'+
+            '<td class="col-subject"><span class="subject-link" onclick="openDetailModal('+e.id+')">'+esc(e.subject)+'</span></td>';
+        if(isReview){
+            html+='<td id="att-cell-'+e.id+'">'+(e.attachment_count||0)+'</td>'+
+                '<td><select class="inline-select" data-id="'+e.id+'" data-field="doc_type">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></td>'+
+                '<td><select class="inline-select" data-id="'+e.id+'" data-field="discipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></td>'+
+                '<td><select class="inline-select" data-id="'+e.id+'" data-field="department"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></td>';
+        }
+        html+='<td>'+renderAiBadge(e.classifier_method, e.confidence)+'</td>';
+        if(isReview){
+            html+='<td class="col-actions"><div class="row-actions">'+
                 '<button class="btn btn-success btn-sm" onclick="approveOne('+e.id+')">Approve</button>'+
                 '<button class="btn btn-danger btn-sm" onclick="rejectOne('+e.id+')">Reject</button>'+
-            '</div></td></tr>';
+                '</div></td>';
+        } else if(isOos){
+            html+='<td class="col-actions"><button class="btn-move-review" onclick="moveToReview('+e.id+')">Move to Review</button></td>';
+        }
+        html+='</tr>';
     }
     html+='</tbody></table></div>';
     html+=renderPagination(filtered.length,pendingPage,'setPendingPage');
     wrap.innerHTML=html;
-    updateBulkBar();
-    // Fetch attachment details for desktop view
-    pg.items.forEach(function(e){
-        if(e.attachment_count>0){
-            fetch('/api/pending/'+e.id+'/attachments').then(function(r){return r.json();}).then(function(data){
-                var cell=document.getElementById('att-cell-'+e.id);
-                if(!cell||!data.attachments||!data.attachments.length) return;
-                var links='<div class="att-list">';
-                data.attachments.forEach(function(att){
-                    var sz=fmtFileSize(att.size), sc=att.is_signature?' att-signature':'', st=att.is_signature?'<span class="tag-signature">Sig</span>':'';
-                    links+='<a href="/api/pending/'+e.id+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'" class="'+sc+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>'+st;
-                }); links+='</div>'; cell.innerHTML=links;
-            }).catch(function(){});
-        }
-    });
+    if(isReview) updateBulkBar();
+    else document.getElementById('bulkActions').style.display='none';
+    // Fetch attachment details for desktop view (only for review status)
+    if(isReview){
+        pg.items.forEach(function(e){
+            if(e.attachment_count>0){
+                fetch('/api/pending/'+e.id+'/attachments').then(function(r){return r.json();}).then(function(data){
+                    var cell=document.getElementById('att-cell-'+e.id);
+                    if(!cell||!data.attachments||!data.attachments.length) return;
+                    var links='<div class="att-list">';
+                    data.attachments.forEach(function(att){
+                        var sz=fmtFileSize(att.size), sc=att.is_signature?' att-signature':'', st=att.is_signature?'<span class="tag-signature">Sig</span>':'';
+                        links+='<a href="/api/pending/'+e.id+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'" class="'+sc+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>'+st;
+                    }); links+='</div>'; cell.innerHTML=links;
+                }).catch(function(){});
+            }
+        });
+    }
 }
 function toggleSelectAll(){
     var ch=document.getElementById('selectAll');
@@ -1133,11 +1223,30 @@ function bulkReject(){
     }).catch(function(){showToast('Bulk reject failed','error');});
 }
 
+function moveToReview(id){
+    fetch('/api/pending/'+id+'/move-to-review',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Moved to review queue','success'); fetchPending();
+    }).catch(function(){showToast('Move failed','error');});
+}
+
 // ---- Detail Modal ----
 function openDetailModal(id){
     currentModalId=id;
     document.getElementById('modalSubject').textContent='Loading...';
     document.getElementById('modalBody').innerHTML='<div class="empty-state">Loading...</div>';
+    // Update modal footer buttons based on current filter
+    var footer=document.getElementById('modalFooter');
+    if(pendingStatusFilter==='out_of_scope'){
+        footer.innerHTML='<button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>'+
+            '<button class="btn-move-review" style="padding:10px 20px;font-size:14px;flex:1" onclick="modalMoveToReview()">Move to Review</button>';
+    } else if(pendingStatusFilter==='rejected'){
+        footer.innerHTML='<button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>';
+    } else {
+        footer.innerHTML='<button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>'+
+            '<button class="btn btn-danger" onclick="modalReject()">Reject</button>'+
+            '<button class="btn btn-success" onclick="modalApprove()">Approve</button>';
+    }
     document.getElementById('detailModal').classList.add('open');
     document.body.style.overflow='hidden';
     fetch('/api/pending/'+id+'/detail').then(function(r){return r.json();}).then(function(e){
@@ -1177,11 +1286,13 @@ function openDetailModal(id){
         if(e.classifier_method){
             h+='<div class="modal-field"><div class="modal-field-label">Classified By</div><div class="modal-field-value">'+renderAiBadge(e.classifier_method, e.confidence)+'</div></div>';
         }
-        h+='<div class="modal-fields-row">';
-        h+='<div class="modal-field"><div class="modal-field-label">Document Type</div><select class="modal-select" id="modalDocType">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></div>';
-        h+='<div class="modal-field"><div class="modal-field-label">Discipline</div><select class="modal-select" id="modalDiscipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></div>';
-        h+='<div class="modal-field"><div class="modal-field-label">Department</div><select class="modal-select" id="modalDepartment"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></div>';
-        h+='</div>';
+        if(pendingStatusFilter==='pending_review'){
+            h+='<div class="modal-fields-row">';
+            h+='<div class="modal-field"><div class="modal-field-label">Document Type</div><select class="modal-select" id="modalDocType">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></div>';
+            h+='<div class="modal-field"><div class="modal-field-label">Discipline</div><select class="modal-select" id="modalDiscipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></div>';
+            h+='<div class="modal-field"><div class="modal-field-label">Department</div><select class="modal-select" id="modalDepartment"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></div>';
+            h+='</div>';
+        }
         document.getElementById('modalBody').innerHTML=h;
     }).catch(function(){document.getElementById('modalBody').innerHTML='<div class="empty-state">Failed to load.</div>';});
 }
@@ -1207,6 +1318,12 @@ function modalReject(){
     fetch('/api/pending/'+currentModalId+'/reject',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
         if(d.error){showToast(d.error,'error');return;} showToast('Rejected','info'); closeDetailModal(); fetchPending();
     }).catch(function(){showToast('Reject failed','error');});
+}
+function modalMoveToReview(){
+    if(!currentModalId)return;
+    fetch('/api/pending/'+currentModalId+'/move-to-review',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;} showToast('Moved to review queue','success'); closeDetailModal(); fetchPending();
+    }).catch(function(){showToast('Move failed','error');});
 }
 
 // ---- Processed ----
