@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Document Control - Email Monitor</title>
+    <script>(function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');})();</script>
     <style>
         :root {
             --bg: #f4f6f9;
@@ -25,6 +26,63 @@
             --shadow-lg: 0 10px 25px rgba(0,0,0,0.12);
             --radius: 10px;
         }
+
+        [data-theme="dark"] {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --text-light: #64748b;
+            --primary: #60a5fa;
+            --primary-dark: #3b82f6;
+            --success: #34d399;
+            --success-dark: #10b981;
+            --danger: #f87171;
+            --danger-dark: #ef4444;
+            --warn: #fbbf24;
+            --purple: #a78bfa;
+            --header-bg: #020617;
+            --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        [data-theme="dark"] thead th { background: #0f172a; color: var(--text-muted); }
+        [data-theme="dark"] .search-box { background-color: #0f172a; color: var(--text); border-color: var(--border); }
+        [data-theme="dark"] .search-box:focus { background-color: var(--card); }
+        [data-theme="dark"] .modal-body-text { background: #0f172a; border-color: var(--border); color: #cbd5e1; }
+        [data-theme="dark"] .sender-known { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .sender-unknown { background: #78350f; color: #fcd34d; }
+        [data-theme="dark"] .ai-badge.conf-high { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .ai-badge.conf-mid { background: #78350f; color: #fcd34d; }
+        [data-theme="dark"] .ai-badge.conf-low { background: #7f1d1d; color: #fca5a5; }
+        [data-theme="dark"] .ai-badge.conf-none { background: #334155; color: var(--text-muted); }
+        [data-theme="dark"] .filter-pill { background: #0f172a; border-color: var(--border); color: var(--text-muted); }
+        [data-theme="dark"] .filter-pill:hover { border-color: var(--primary); }
+        [data-theme="dark"] .filter-pill.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        [data-theme="dark"] .form-group input { background: #0f172a; color: var(--text); border-color: var(--border); }
+        [data-theme="dark"] .form-group input:focus { border-color: var(--primary); }
+        [data-theme="dark"] .inline-select { background: #0f172a; color: var(--text); border-color: var(--border); }
+        [data-theme="dark"] .clf-select { background: #0f172a; color: var(--text); border-color: var(--border); }
+        [data-theme="dark"] .modal-select { background: #0f172a; color: var(--text); border-color: var(--border); }
+        [data-theme="dark"] .ai-textarea { background: #0f172a; color: var(--text); border-color: var(--border); }
+        [data-theme="dark"] .clf-badge { background: #334155; color: var(--text); }
+        [data-theme="dark"] .key-pill.on { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .key-pill.off { background: #334155; color: var(--text-light); }
+        [data-theme="dark"] .card-tag { background: #334155; color: var(--text-muted); }
+        [data-theme="dark"] .tag { background: #334155; color: var(--text-muted); }
+        [data-theme="dark"] .view-toggle { background: #0f172a; color: var(--text-muted); border-color: var(--border); }
+        [data-theme="dark"] .view-toggle:hover { background: #334155; }
+        [data-theme="dark"] tbody tr:hover { background: #334155; }
+        [data-theme="dark"] tbody tr { border-bottom-color: #334155; }
+        [data-theme="dark"] .email-cards { background: #0f172a; }
+        [data-theme="dark"] .email-card:active { background: #334155; }
+        [data-theme="dark"] .step-card { background: #334155; }
+        [data-theme="dark"] .page-btn { background: var(--card); color: var(--text-muted); border-color: var(--border); }
+        [data-theme="dark"] .page-btn:hover { background: #334155; color: var(--text); }
+        [data-theme="dark"] .error-msg { background: #451a1a; }
+        [data-theme="dark"] .modal-close:hover { background: #334155; }
+        [data-theme="dark"] .btn-ghost { color: var(--text-muted); border-color: var(--border); }
+        [data-theme="dark"] .btn-ghost:hover { background: #334155; color: var(--text); }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -627,6 +685,61 @@
             font-size: 11px; color: var(--text-muted); margin-top: 2px;
             font-style: italic; word-break: break-word;
         }
+
+        /* ---- Dark Mode Toggle (F6) ---- */
+        .dark-toggle {
+            background: transparent; border: none; color: #fff;
+            font-size: 18px; cursor: pointer; padding: 4px 6px;
+            border-radius: 6px; display: flex; align-items: center;
+            justify-content: center; transition: background .15s;
+        }
+        .dark-toggle:hover { background: rgba(255,255,255,0.1); }
+
+        /* ---- Logout Button (F1) ---- */
+        .header-link {
+            color: rgba(255,255,255,0.6); font-size: 12px; font-weight: 600;
+            text-decoration: none; padding: 4px 8px; border-radius: 4px;
+            transition: all .15s;
+        }
+        .header-link:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+        /* ---- Classifier Notice (F2) ---- */
+        .classifier-notice {
+            background: #fef3c7; color: #92400e;
+            font-size: 12px; font-weight: 500;
+            padding: 8px 14px; border-radius: 8px;
+            margin-bottom: 10px; display: none;
+        }
+        [data-theme="dark"] .classifier-notice { background: #78350f; color: #fcd34d; }
+
+        /* ---- Body View Toggle (F5) ---- */
+        .body-view-toggle {
+            display: inline-flex; gap: 0; border-radius: 6px; overflow: hidden;
+            border: 1px solid var(--border); margin-bottom: 8px;
+        }
+        .body-view-btn {
+            padding: 5px 12px; font-size: 11px; font-weight: 600;
+            border: none; cursor: pointer;
+            background: var(--card); color: var(--text-muted);
+            transition: all .15s;
+        }
+        .body-view-btn.active { background: var(--primary); color: #fff; }
+        .body-view-btn:hover:not(.active) { background: #f1f5f9; }
+        [data-theme="dark"] .body-view-btn:hover:not(.active) { background: #334155; }
+        .modal-body-html {
+            border: 1px solid var(--border); border-radius: 8px;
+            width: 100%; min-height: 200px; max-height: 400px;
+            background: #fff;
+        }
+
+        /* ---- Reopen Button (F3) ---- */
+        .btn-reopen {
+            background: var(--purple); color: #fff;
+            border: none; padding: 5px 10px; border-radius: 6px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            transition: all .15s;
+        }
+        .btn-reopen:hover { opacity: 0.85; }
     </style>
 </head>
 <body>
@@ -637,6 +750,8 @@
                 <span class="status-dot idle" id="headerDot"></span>
                 <span id="headerStatus">Idle</span>
             </div>
+            <button class="dark-toggle" id="darkToggle" onclick="toggleDarkMode()" title="Toggle dark mode">&#9790;</button>
+            {% if auth_enabled %}<a class="header-link" href="/logout">Logout</a>{% endif %}
         </div>
     </header>
 
@@ -768,6 +883,8 @@
                 </div>
             </div>
 
+            <div class="classifier-notice" id="classifierNotice"></div>
+
             <div class="table-card">
                 <div class="table-toolbar">
                     <div class="toolbar-top">
@@ -811,7 +928,7 @@
                             <button class="view-toggle desktop-only" id="processedViewToggle" onclick="toggleView('processed')">Expanded</button>
                         </div>
                     </div>
-                    <input class="search-box" id="processedSearch" type="text" placeholder="Filter processed..." oninput="filterProcessed()">
+                    <input class="search-box" id="processedSearch" type="text" placeholder="Search processed..." oninput="debouncedSearchProcessed()">
                 </div>
                 <div id="emailTableWrap"><div class="empty-state">No emails processed yet.</div></div>
             </div>
@@ -875,7 +992,7 @@ var selectedIds = new Set();
 var pendingStatusFilter = 'pending_review';
 var viewModes = { pending: 'compact', processed: 'compact' };
 var currentModalId = null;
-var modalBodyFull = '', modalBodySummary = '', showingFullBody = false;
+var modalBodyFull = '', modalBodySummary = '', modalBodyHtml = '', showingFullBody = false, currentBodyView = 'text';
 var pendingPage = 0, processedPage = 0;
 var PAGE_SIZE = 15;
 var isMobile = window.innerWidth < 768;
@@ -925,6 +1042,35 @@ function renderAiBadge(method, confidence) {
     var label = esc(method);
     if (pct !== null) label += ' \u00b7 ' + pct + '%';
     return '<span class="ai-badge ' + cls + '"><span class="ai-dot"></span>' + label + '</span>';
+}
+
+// ---- Dark Mode (F6) ----
+function toggleDarkMode() {
+    var html = document.documentElement;
+    var isDark = html.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+        html.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'light');
+    } else {
+        html.setAttribute('data-theme', 'dark');
+        localStorage.setItem('theme', 'dark');
+    }
+    updateDarkToggleIcon();
+}
+function updateDarkToggleIcon() {
+    var btn = document.getElementById('darkToggle');
+    if (!btn) return;
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    btn.innerHTML = isDark ? '&#9788;' : '&#9790;';
+    btn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+}
+updateDarkToggleIcon();
+
+// ---- Debounced Server Search (F4) ----
+var _searchTimer = null;
+function debouncedSearchProcessed() {
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(function() { fetchEmails(0); }, 400);
 }
 
 // ---- Pagination ----
@@ -987,6 +1133,31 @@ function updateStatus(data) {
     var btn=document.getElementById('btnScan');
     if(data.status==='scanning'){btn.disabled=true;btn.textContent='Scanning...';}
     else{btn.disabled=false;btn.textContent='Scan Now';}
+    // F2: Classifier downgrade notice
+    var notice = document.getElementById('classifierNotice');
+    if (notice && data.classifiers_used && data.classifiers_used.length > 0) {
+        fetch('/api/classifier-info').then(function(r){return r.json();}).then(function(info){
+            var configured = info.method;
+            var used = data.classifiers_used;
+            var downgraded = false;
+            var usedNames = used.join(', ');
+            if (configured !== 'rule_based') {
+                for (var i = 0; i < used.length; i++) {
+                    if (used[i] === 'rule_based' || (configured !== 'auto' && used[i] !== configured)) {
+                        downgraded = true; break;
+                    }
+                }
+            }
+            if (downgraded) {
+                notice.textContent = 'Last scan used: ' + usedNames + ' (configured: ' + info.active_label + ')';
+                notice.style.display = 'block';
+            } else {
+                notice.style.display = 'none';
+            }
+        }).catch(function(){ notice.style.display = 'none'; });
+    } else if (notice) {
+        notice.style.display = 'none';
+    }
 }
 function fetchStatus(){fetch('/api/status').then(function(r){return r.json();}).then(updateStatus).catch(function(){});}
 function triggerScan() {
@@ -1001,7 +1172,7 @@ function startScanPolling(){
     if(scanPollTimer)clearInterval(scanPollTimer);
     scanPollTimer=setInterval(function(){
         fetch('/api/status').then(function(r){return r.json();}).then(function(d){
-            updateStatus(d);if(d.status!=='scanning'){clearInterval(scanPollTimer);scanPollTimer=null;fetchPending();fetchEmails();}
+            updateStatus(d);if(d.status!=='scanning'){clearInterval(scanPollTimer);scanPollTimer=null;fetchPending();fetchEmails(0);}
         }).catch(function(){});
     },2000);
 }
@@ -1105,6 +1276,8 @@ function renderPendingTable() {
             html+='<button class="btn btn-danger btn-sm" onclick="rejectOne('+e.id+')">Reject</button>';
         } else if(isOos){
             html+='<button class="btn-move-review" onclick="moveToReview('+e.id+')">Move to Review</button>';
+        } else if(isRejected){
+            html+='<button class="btn-reopen" onclick="reopenRejected('+e.id+')">Reopen</button>';
         }
         html+='</div></div></div>';
     }
@@ -1117,7 +1290,7 @@ function renderPendingTable() {
     html+='<th style="width:30px">#</th><th>Date</th><th>From</th><th>Subject</th>';
     if(isReview) html+='<th>Att.</th><th>Type</th><th>Discipline</th><th>Dept.</th>';
     html+='<th>AI</th>';
-    if(!isRejected) html+='<th>Actions</th>';
+    html+='<th>Actions</th>';
     html+='</tr></thead><tbody>';
     for(var i=0;i<pg.items.length;i++){
         var e=pg.items[i], idx=pg.page*PAGE_SIZE+i+1;
@@ -1145,6 +1318,8 @@ function renderPendingTable() {
                 '</div></td>';
         } else if(isOos){
             html+='<td class="col-actions"><button class="btn-move-review" onclick="moveToReview('+e.id+')">Move to Review</button></td>';
+        } else if(isRejected){
+            html+='<td class="col-actions"><button class="btn-reopen" onclick="reopenRejected('+e.id+')">Reopen</button></td>';
         }
         html+='</tr>';
     }
@@ -1231,6 +1406,13 @@ function moveToReview(id){
     }).catch(function(){showToast('Move failed','error');});
 }
 
+function reopenRejected(id){
+    fetch('/api/pending/'+id+'/reopen',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Reopened for review','success'); fetchPending();
+    }).catch(function(){showToast('Reopen failed','error');});
+}
+
 // ---- Detail Modal ----
 function openDetailModal(id){
     currentModalId=id;
@@ -1242,7 +1424,8 @@ function openDetailModal(id){
         footer.innerHTML='<button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>'+
             '<button class="btn-move-review" style="padding:10px 20px;font-size:14px;flex:1" onclick="modalMoveToReview()">Move to Review</button>';
     } else if(pendingStatusFilter==='rejected'){
-        footer.innerHTML='<button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>';
+        footer.innerHTML='<button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>'+
+            '<button class="btn-reopen" style="padding:10px 20px;font-size:14px;flex:1" onclick="modalReopenRejected()">Reopen</button>';
     } else {
         footer.innerHTML='<button class="btn btn-ghost" onclick="closeDetailModal()">Close</button>'+
             '<button class="btn btn-danger" onclick="modalReject()">Reject</button>'+
@@ -1268,13 +1451,20 @@ function openDetailModal(id){
         h+='</div>';
         var summary=e.body_summary||'', full=e.body||'';
         modalBodySummary=summary; modalBodyFull=full; showingFullBody=false;
+        modalBodyHtml=e.body_html||''; currentBodyView='text';
         h+='<div class="modal-field"><div class="modal-field-label">Body</div>';
+        if(modalBodyHtml){
+            h+='<div class="body-view-toggle"><button class="body-view-btn active" id="btnViewText" onclick="switchBodyView(\'text\')">Text</button><button class="body-view-btn" id="btnViewHtml" onclick="switchBodyView(\'html\')">HTML</button></div>';
+        }
+        h+='<div id="bodyTextWrap">';
         if(summary){
             h+='<div class="modal-body-text" id="modalBodyText">'+esc(summary)+'</div>';
             if(full.length>summary.length) h+='<span class="body-toggle" id="bodyToggle" onclick="toggleFullBody()">Show full body</span>';
         } else {
             h+='<div class="modal-body-text" id="modalBodyText">'+esc(full||'(no body)')+'</div>';
         }
+        h+='</div>';
+        h+='<div id="bodyHtmlWrap" style="display:none"><iframe class="modal-body-html" id="bodyHtmlFrame" sandbox="allow-same-origin" srcdoc=""></iframe></div>';
         h+='</div>';
         var atts=e.attachments||[];
         if(atts.length){
@@ -1326,38 +1516,61 @@ function modalMoveToReview(){
         if(d.error){showToast(d.error,'error');return;} showToast('Moved to review queue','success'); closeDetailModal(); fetchPending();
     }).catch(function(){showToast('Move failed','error');});
 }
+function modalReopenRejected(){
+    if(!currentModalId)return;
+    fetch('/api/pending/'+currentModalId+'/reopen',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;} showToast('Reopened for review','success'); closeDetailModal(); fetchPending();
+    }).catch(function(){showToast('Reopen failed','error');});
+}
+function switchBodyView(view){
+    currentBodyView=view;
+    var textWrap=document.getElementById('bodyTextWrap'),htmlWrap=document.getElementById('bodyHtmlWrap');
+    var btnText=document.getElementById('btnViewText'),btnHtml=document.getElementById('btnViewHtml');
+    if(view==='html'){
+        if(textWrap)textWrap.style.display='none';
+        if(htmlWrap){htmlWrap.style.display='block';
+            var frame=document.getElementById('bodyHtmlFrame');
+            if(frame&&!frame.getAttribute('data-loaded')){frame.srcdoc=modalBodyHtml;frame.setAttribute('data-loaded','1');}
+        }
+        if(btnText)btnText.classList.remove('active');
+        if(btnHtml)btnHtml.classList.add('active');
+    } else {
+        if(textWrap)textWrap.style.display='block';
+        if(htmlWrap)htmlWrap.style.display='none';
+        if(btnText)btnText.classList.add('active');
+        if(btnHtml)btnHtml.classList.remove('active');
+    }
+}
 
 // ---- Processed ----
-function fetchEmails(){
-    fetch('/api/emails').then(function(r){return r.json();}).then(function(data){
+var processedServerPage = 0, processedServerPages = 0, processedServerQuery = '';
+
+function fetchEmails(page){
+    if(page===undefined) page=0;
+    var q=(document.getElementById('processedSearch')?document.getElementById('processedSearch').value:'').trim();
+    processedServerQuery=q;
+    fetch('/api/emails?q='+encodeURIComponent(q)+'&page='+page).then(function(r){return r.json();}).then(function(data){
         document.getElementById('statTotal').textContent=data.total;
         document.getElementById('statToday').textContent=data.today;
         document.getElementById('statAttach').textContent=data.with_attachments;
-        processedEmails=data.emails||[]; processedPage=0; renderProcessedTable();
+        processedEmails=data.emails||[];
+        processedServerPage=data.page||0;
+        processedServerPages=data.pages||0;
+        renderProcessedTable();
     }).catch(function(){});
 }
-function getFilteredProcessed(){
-    var q=(document.getElementById('processedSearch').value||'').toLowerCase().trim();
-    if(!q) return processedEmails;
-    return processedEmails.filter(function(e){
-        return (e.subject||'').toLowerCase().indexOf(q)>=0 ||
-               (e.sender||'').toLowerCase().indexOf(q)>=0 ||
-               (e.transmittal_no||'').toLowerCase().indexOf(q)>=0;
-    });
-}
-function filterProcessed(){processedPage=0;renderProcessedTable();}
-function setProcessedPage(p){processedPage=p;renderProcessedTable();}
+
 function renderProcessedTable(){
     var wrap=document.getElementById('emailTableWrap');
-    var filtered=getFilteredProcessed();
-    if(!filtered.length){wrap.innerHTML='<div class="empty-state">'+(processedEmails.length?'No matches.':'No emails processed yet.')+'</div>';return;}
-    var pg=paginate(filtered,processedPage);
+    var items=processedEmails;
+    if(!items.length){wrap.innerHTML='<div class="empty-state">'+(processedServerQuery?'No matches.':'No emails processed yet.')+'</div>';return;}
     var html='';
+    var page=processedServerPage, perPage=50;
 
     // Mobile cards
     html += '<div class="email-cards">';
-    for(var i=0;i<pg.items.length;i++){
-        var e=pg.items[i];
+    for(var i=0;i<items.length;i++){
+        var e=items[i];
         html+='<div class="email-card">';
         html+='<div class="card-row"><div style="flex:1;min-width:0">';
         html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+'</div>';
@@ -1381,8 +1594,8 @@ function renderProcessedTable(){
     html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
         '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>Subject</th>'+
         '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
-    for(var i=0;i<pg.items.length;i++){
-        var e=pg.items[i], idx=pg.page*PAGE_SIZE+i+1;
+    for(var i=0;i<items.length;i++){
+        var e=items[i], idx=page*perPage+i+1;
         var sd=esc(e.sender_name||e.sender);
         if(e.sender_company) sd+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
         var rc=e.response_required?'resp-yes':'resp-no', rt=e.response_required?'Yes':'No';
@@ -1395,7 +1608,22 @@ function renderProcessedTable(){
             '<td><span class="'+rc+'">'+rt+'</span></td><td>'+(e.attachment_count||0)+'</td></tr>';
     }
     html+='</tbody></table></div>';
-    html+=renderPagination(filtered.length,processedPage,'setProcessedPage');
+    // Server-side pagination
+    if(processedServerPages>1){
+        var totalItems=(processedServerPages*perPage); // approximate
+        var from=page*perPage+1, to=page*perPage+items.length;
+        html+='<div class="table-footer"><span>'+from+'-'+to+'</span><div class="pagination">';
+        html+='<button class="page-btn" onclick="fetchEmails('+(page-1)+')"'+(page===0?' disabled':'')+'>&laquo;</button>';
+        var maxBtns=isMobile?5:processedServerPages;
+        var startP=Math.max(0,page-Math.floor(maxBtns/2));
+        var endP=Math.min(processedServerPages,startP+maxBtns);
+        if(endP-startP<maxBtns)startP=Math.max(0,endP-maxBtns);
+        for(var i=startP;i<endP;i++){
+            html+='<button class="page-btn'+(i===page?' active':'')+'" onclick="fetchEmails('+i+')">'+(i+1)+'</button>';
+        }
+        html+='<button class="page-btn" onclick="fetchEmails('+(page+1)+')"'+(page>=processedServerPages-1?' disabled':'')+'>&raquo;</button>';
+        html+='</div></div>';
+    }
     wrap.innerHTML=html;
 }
 

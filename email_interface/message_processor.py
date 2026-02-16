@@ -67,6 +67,7 @@ class MessageProcessor:
                 date = None
 
         body = ''
+        body_html = ''
         attachments = []
 
         if msg.is_multipart():
@@ -87,14 +88,20 @@ class MessageProcessor:
                     payload = part.get_payload(decode=True)
                     if payload:
                         body = payload.decode('utf-8', errors='replace')
-                elif content_type == 'text/html' and not body:
+                elif content_type == 'text/html' and not body_html:
                     payload = part.get_payload(decode=True)
                     if payload:
-                        body = payload.decode('utf-8', errors='replace')
+                        body_html = payload.decode('utf-8', errors='replace')
+                        if not body:
+                            body = body_html
         else:
             payload = msg.get_payload(decode=True)
             if payload:
-                body = payload.decode('utf-8', errors='replace')
+                ct = msg.get_content_type()
+                decoded = payload.decode('utf-8', errors='replace')
+                if ct == 'text/html':
+                    body_html = decoded
+                body = decoded
 
         return {
             'message_id': msg.get('Message-ID', ''),
@@ -105,6 +112,7 @@ class MessageProcessor:
             'subject': msg.get('Subject', ''),
             'date': date,
             'body': body,
+            'body_html': body_html,
             'attachments': attachments,
         }
 

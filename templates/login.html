@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Document Control</title>
+    <script>
+        (function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');})();
+    </script>
+    <style>
+        :root {
+            --bg: #f4f6f9;
+            --card: #fff;
+            --border: #e2e6ed;
+            --text: #1e293b;
+            --text-muted: #64748b;
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --danger: #ef4444;
+            --header-bg: #0f172a;
+            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.12);
+            --radius: 10px;
+        }
+        [data-theme="dark"] {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --header-bg: #020617;
+            --shadow: 0 1px 3px rgba(0,0,0,0.3);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+        }
+        .login-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow-lg); padding: 32px 28px;
+            width: 100%; max-width: 380px; margin: 16px;
+        }
+        .login-card h1 {
+            font-size: 20px; font-weight: 800; text-align: center;
+            margin-bottom: 6px;
+        }
+        .login-card p {
+            font-size: 13px; color: var(--text-muted); text-align: center;
+            margin-bottom: 20px;
+        }
+        .form-group { margin-bottom: 16px; }
+        .form-group label {
+            display: block; font-size: 11px; font-weight: 600;
+            color: var(--text-muted); text-transform: uppercase;
+            letter-spacing: .3px; margin-bottom: 6px;
+        }
+        .form-group input {
+            width: 100%; padding: 10px 14px;
+            border: 1px solid var(--border); border-radius: 8px;
+            font-size: 15px; background: var(--card); color: var(--text);
+            transition: border-color .15s;
+        }
+        .form-group input:focus { border-color: var(--primary); outline: none; }
+        .btn-login {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            background: var(--primary); color: #fff;
+            font-size: 14px; font-weight: 700; cursor: pointer;
+            transition: background .15s;
+        }
+        .btn-login:hover { background: var(--primary-dark); }
+        .error-msg {
+            background: #fef2f2; color: var(--danger);
+            font-size: 13px; font-weight: 500;
+            padding: 8px 12px; border-radius: 6px;
+            margin-bottom: 14px; text-align: center;
+        }
+        [data-theme="dark"] .error-msg { background: #451a1a; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1>Document Control</h1>
+        <p>Enter the dashboard password to continue.</p>
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+        <form method="POST">
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" autofocus required placeholder="Enter password">
+            </div>
+            <button type="submit" class="btn-login">Sign In</button>
+        </form>
+    </div>
+</body>
+</html>

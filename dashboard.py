@@ -16,7 +16,7 @@ import time
 from collections import deque
 from datetime import datetime
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from openpyxl import Workbook
 
 import re
@@ -83,6 +83,22 @@ def _summarize_body(body, max_chars=1500):
 
 app = Flask(__name__)
 
+# --- Auth (F1) ---
+DASHBOARD_PASSWORD = os.environ.get('DASHBOARD_PASSWORD', '')
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32))
+
+
+@app.before_request
+def require_login():
+    """If DASHBOARD_PASSWORD is set, require authentication."""
+    if not DASHBOARD_PASSWORD:
+        return  # No password set, skip auth
+    if request.endpoint in ('login', 'static'):
+        return  # Allow login page and static files
+    if not session.get('authenticated'):
+        return redirect(url_for('login'))
+
+
 # --- Scan state (shared across threads) ---
 scan_lock = threading.Lock()
 scan_state = {
@@ -91,6 +107,7 @@ scan_state = {
     'last_scan_result': None, # e.g. "3 emails queued" or error message
     'last_scan_ok': True,
     'next_scan_time': None,
+    'classifiers_used': [],   # F2: track which classifiers were used in last scan
 }
 
 # --- Logging setup (run once) ---
@@ -173,6 +190,24 @@ def run_scan():
         from email_interface.scanner import scan_and_queue
         counts = scan_and_queue(base_dir=BASE_DIR)
 
+        # F2: Check classifier methods used by recently scanned emails
+        classifiers_used = []
+        if counts['queued'] > 0 or counts['out_of_scope'] > 0:
+            try:
+                tracker = _get_tracker()
+                conn = sqlite3.connect(_get_db_path())
+                conn.row_factory = sqlite3.Row
+                cur = conn.execute(
+                    """SELECT DISTINCT classifier_method FROM pending_emails
+                       WHERE scanned_at >= ? AND classifier_method IS NOT NULL AND classifier_method != ''""",
+                    (scan_state.get('last_scan_time') or '2000-01-01',)
+                )
+                classifiers_used = [row['classifier_method'] for row in cur.fetchall()]
+                conn.close()
+                tracker.close()
+            except Exception:
+                pass
+
         scan_state['status'] = 'idle'
         scan_state['last_scan_time'] = datetime.now().isoformat()
         scan_state['last_scan_result'] = (
@@ -180,6 +215,7 @@ def run_scan():
             f"{counts['skipped']} skipped"
         )
         scan_state['last_scan_ok'] = counts['errors'] == 0
+        scan_state['classifiers_used'] = classifiers_used
         logger.info("Dashboard: scan complete - %s", scan_state['last_scan_result'])
 
     except Exception as e:
@@ -200,9 +236,28 @@ def run_scan_in_thread():
 
 # --- Flask Routes ---
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if not DASHBOARD_PASSWORD:
+        return redirect(url_for('index'))
+    error = ''
+    if request.method == 'POST':
+        if request.form.get('password') == DASHBOARD_PASSWORD:
+            session['authenticated'] = True
+            return redirect(url_for('index'))
+        error = 'Incorrect password'
+    return render_template('login.html', error=error)
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+
 @app.route('/')
 def index():
-    return render_template('dashboard.html')
+    return render_template('dashboard.html', auth_enabled=bool(DASHBOARD_PASSWORD))
 
 
 @app.route('/api/status')
@@ -213,6 +268,7 @@ def api_status():
         'last_scan_result': scan_state['last_scan_result'],
         'last_scan_ok': scan_state['last_scan_ok'],
         'next_scan_time': scan_state['next_scan_time'],
+        'classifiers_used': scan_state.get('classifiers_used', []),
     })
 
 
@@ -373,29 +429,49 @@ def api_scan():
 def api_emails():
     db_path = _get_db_path()
     if not os.path.exists(db_path):
-        return jsonify({'emails': [], 'total': 0, 'today': 0, 'with_attachments': 0})
+        return jsonify({'emails': [], 'total': 0, 'today': 0, 'with_attachments': 0,
+                        'page': 0, 'pages': 0, 'query': ''})
+
+    query = request.args.get('q', '').strip()
+    page = max(0, int(request.args.get('page', 0)))
+    per_page = min(200, max(1, int(request.args.get('per_page', 50))))
 
     tracker = _get_tracker()
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        # Recent emails with full classification (newest first, limit 50)
+        base_where = ""
+        params = []
+        if query:
+            base_where = """WHERE (subject LIKE ? OR sender LIKE ?
+                            OR sender_name LIKE ? OR transmittal_no LIKE ?)"""
+            like_q = f'%{query}%'
+            params = [like_q, like_q, like_q, like_q]
+
+        # Count matching rows
+        count_sql = f"SELECT COUNT(*) FROM processed_messages {base_where}"
+        total_matching = conn.execute(count_sql, params).fetchone()[0]
+        total_pages = max(1, (total_matching + per_page - 1) // per_page)
+        page = min(page, total_pages - 1)
+
+        # Fetch page
         cur = conn.execute(
-            """SELECT transmittal_no, processed_at, sender, sender_name,
+            f"""SELECT transmittal_no, processed_at, sender, sender_name,
                       to_recipients, cc_recipients, subject, attachment_count,
                       doc_type, discipline, department, response_required, references_json
-               FROM processed_messages ORDER BY processed_at DESC LIMIT 50"""
+               FROM processed_messages {base_where}
+               ORDER BY processed_at DESC LIMIT ? OFFSET ?""",
+            params + [per_page, page * per_page],
         )
         emails = []
         for row in cur.fetchall():
             e = dict(row)
-            # Look up sender in contacts for company info
             contact = tracker.find_contact_by_email(e.get('sender', ''))
             e['sender_company'] = contact['company'] if contact else ''
             e['sender_known'] = contact is not None
             emails.append(e)
 
-        # Stats
+        # Stats (unfiltered)
         total = conn.execute("SELECT COUNT(*) FROM processed_messages").fetchone()[0]
 
         today_str = datetime.now().strftime('%Y-%m-%d')
@@ -413,9 +489,14 @@ def api_emails():
             'total': total,
             'today': today,
             'with_attachments': with_att,
+            'page': page,
+            'pages': total_pages,
+            'query': query,
+            'total_matching': total_matching,
         })
     except sqlite3.OperationalError:
-        return jsonify({'emails': [], 'total': 0, 'today': 0, 'with_attachments': 0})
+        return jsonify({'emails': [], 'total': 0, 'today': 0, 'with_attachments': 0,
+                        'page': 0, 'pages': 0, 'query': query})
     finally:
         conn.close()
         tracker.close()
@@ -490,6 +571,7 @@ def api_pending_detail(pending_id):
 
         # Add cleaned body summary
         email['body_summary'] = _summarize_body(email.get('body', ''))
+        email['has_html_body'] = bool(email.get('body_html'))
 
         return jsonify(email)
     finally:
@@ -608,6 +690,18 @@ def api_move_to_review(pending_id):
     try:
         tracker.move_to_review(pending_id)
         return jsonify({'message': 'Moved to review'})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    finally:
+        tracker.close()
+
+
+@app.route('/api/pending/<int:pending_id>/reopen', methods=['POST'])
+def api_reopen(pending_id):
+    tracker = _get_tracker()
+    try:
+        tracker.reopen_rejected(pending_id)
+        return jsonify({'message': 'Reopened for review'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     finally:

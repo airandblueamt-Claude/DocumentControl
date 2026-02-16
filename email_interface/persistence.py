@@ -101,6 +101,7 @@ _MIGRATIONS = [
     ("pending_emails", "classifier_method", "TEXT"),
     ("pending_emails", "confidence", "REAL"),
     ("departments", "description", "TEXT"),
+    ("pending_emails", "body_html", "TEXT"),
 ]
 
 
@@ -220,8 +221,9 @@ class ProcessingTracker:
                (message_id, status, scanned_at, sender, sender_name,
                 to_recipients, cc_recipients, subject, email_date, body,
                 doc_type, discipline, department, response_required,
-                references_json, attachment_count, classifier_method, confidence)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                references_json, attachment_count, classifier_method, confidence,
+                body_html)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_data.get('message_id', ''),
                 status,
@@ -241,6 +243,7 @@ class ProcessingTracker:
                 len(msg_data.get('attachments', [])),
                 classification.get('classifier_method', ''),
                 classification.get('confidence'),
+                msg_data.get('body_html', ''),
             ),
         )
         self._conn.commit()
@@ -439,6 +442,20 @@ class ProcessingTracker:
         )
         self._conn.commit()
         logger.info("Moved to review: pending #%d", pending_id)
+
+    def reopen_rejected(self, pending_id):
+        """Reopen a rejected email back to pending_review."""
+        pe = self.get_pending_email(pending_id)
+        if not pe:
+            raise ValueError(f"Pending email #{pending_id} not found")
+        if pe['status'] != 'rejected':
+            raise ValueError(f"Email #{pending_id} is {pe['status']}, not rejected")
+        self._conn.execute(
+            "UPDATE pending_emails SET status = 'pending_review', decided_at = NULL WHERE id = ?",
+            (pending_id,)
+        )
+        self._conn.commit()
+        logger.info("Reopened rejected: pending #%d", pending_id)
 
     # --- Departments ---
 
