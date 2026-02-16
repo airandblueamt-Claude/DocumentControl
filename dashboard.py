@@ -6,6 +6,7 @@ Phase 1 uses scan_and_queue() for the review queue workflow.
 Phase 2 is user-driven approve/reject from the dashboard.
 """
 
+import io
 import json
 import logging
 import os
@@ -16,6 +17,7 @@ from collections import deque
 from datetime import datetime
 
 from flask import Flask, Response, jsonify, render_template, request
+from openpyxl import Workbook
 
 import re
 
@@ -895,6 +897,87 @@ def api_contacts_delete(contact_id):
         return jsonify({'message': 'Deleted'})
     finally:
         tracker.close()
+
+
+# --- Excel Export ---
+
+@app.route('/api/export/excel')
+def api_export_excel():
+    """Generate correspondence log as Excel download from SQLite data."""
+    from email_monitor import EXCEL_HEADERS
+
+    db_path = _get_db_path()
+    if not os.path.exists(db_path):
+        return jsonify({'error': 'No data available'}), 404
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.execute(
+            """SELECT pm.transmittal_no, pm.processed_at, pm.sender,
+                      pm.to_recipients, pm.cc_recipients, pm.subject,
+                      pm.references_json, pm.doc_type, pm.discipline,
+                      pm.response_required, pm.attachment_count,
+                      pm.message_id, pe.attachment_folder
+               FROM processed_messages pm
+               LEFT JOIN pending_emails pe ON pm.message_id = pe.message_id
+               ORDER BY pm.processed_at DESC"""
+        )
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        return jsonify({'error': 'No data available'}), 404
+    finally:
+        conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Correspondence Log'
+    ws.append(EXCEL_HEADERS)
+
+    for row in rows:
+        # Parse JSON fields to semicolon-separated strings
+        to_list = json.loads(row['to_recipients'] or '[]')
+        to_str = '; '.join(
+            r.get('email', '') if isinstance(r, dict) else str(r)
+            for r in to_list
+        )
+        cc_list = json.loads(row['cc_recipients'] or '[]')
+        cc_str = '; '.join(
+            r.get('email', '') if isinstance(r, dict) else str(r)
+            for r in cc_list
+        )
+        refs = json.loads(row['references_json'] or '[]')
+        refs_str = '; '.join(refs)
+
+        date_str = row['processed_at'] or ''
+
+        ws.append([
+            row['transmittal_no'] or '',
+            date_str,
+            row['sender'] or '',
+            to_str,
+            cc_str,
+            row['subject'] or '',
+            refs_str,
+            row['doc_type'] or '',
+            row['discipline'] or '',
+            'Y' if row['response_required'] else 'N',
+            row['attachment_count'] or 0,
+            row['attachment_folder'] or '',
+            row['message_id'] or '',
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return Response(
+        buf.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': 'attachment; filename="correspondence_log.xlsx"',
+        },
+    )
 
 
 # --- Classification Options (for dropdowns) ---
