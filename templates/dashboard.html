@@ -915,6 +915,7 @@
                     <div class="scanner-actions">
                         <button class="btn btn-primary btn-scan" id="btnScan" onclick="triggerScan()">Scan Now</button>
                         <button class="btn btn-ghost btn-scan" id="btnScanAll" onclick="triggerScanAll()" title="Scan ALL emails in inbox (read + unread) — use once to catch everything">Scan All Emails</button>
+                        <button class="btn btn-ghost btn-scan" id="btnReclassify" onclick="triggerReclassify()" title="Re-run classification on pending emails using current departments, contacts, and rules" style="border-color:var(--accent);">Re-classify</button>
                     </div>
                 </div>
                 <div class="control-card classifier">
@@ -1218,8 +1219,9 @@ function updateStatus(data) {
     if(data.last_scan_result){sr.textContent=data.last_scan_result;sr.className='ctrl-value '+(data.last_scan_ok?'ok':'err');}
     var btn=document.getElementById('btnScan');
     var btnAll=document.getElementById('btnScanAll');
-    if(data.status==='scanning'){btn.disabled=true;btn.textContent='Scanning...';if(btnAll)btnAll.disabled=true;}
-    else{btn.disabled=false;btn.textContent='Scan Now';if(btnAll){btnAll.disabled=false;btnAll.textContent='Scan All Emails';}}
+    var btnReclass=document.getElementById('btnReclassify');
+    if(data.status==='scanning'){btn.disabled=true;btn.textContent='Scanning...';if(btnAll)btnAll.disabled=true;if(btnReclass)btnReclass.disabled=true;}
+    else{btn.disabled=false;btn.textContent='Scan Now';if(btnAll){btnAll.disabled=false;btnAll.textContent='Scan All Emails';}if(btnReclass){btnReclass.disabled=false;btnReclass.textContent='Re-classify';}}
     // F2: Classifier downgrade notice
     var notice = document.getElementById('classifierNotice');
     if (notice && data.classifiers_used && data.classifiers_used.length > 0) {
@@ -1263,6 +1265,17 @@ function triggerScanAll() {
         showToast('Full inbox scan started — this may take a few minutes','info');
         startScanPolling();
     }).catch(function(){btn.disabled=false;btn.textContent='Scan All Emails';btnMain.disabled=false;});
+}
+function triggerReclassify() {
+    var includeOOS=confirm('Re-classify all pending emails using current departments, contacts, and rules.\n\nAlso include out-of-scope emails? (OK = Yes, Cancel = pending only)');
+    var btn=document.getElementById('btnReclassify'); btn.disabled=true; btn.textContent='Re-classifying...';
+    var btnMain=document.getElementById('btnScan'); btnMain.disabled=true;
+    var btnAll=document.getElementById('btnScanAll'); if(btnAll)btnAll.disabled=true;
+    fetch('/api/reclassify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({include_out_of_scope:includeOOS})}).then(function(r){
+        if(r.status===409){btn.textContent='Already running';setTimeout(function(){btn.disabled=false;btn.textContent='Re-classify';btnMain.disabled=false;if(btnAll)btnAll.disabled=false;},2000);return;}
+        showToast('Re-classification started','info');
+        startScanPolling();
+    }).catch(function(){btn.disabled=false;btn.textContent='Re-classify';btnMain.disabled=false;if(btnAll)btnAll.disabled=false;});
 }
 var scanPollTimer=null;
 function startScanPolling(){

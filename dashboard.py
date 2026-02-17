@@ -931,6 +931,177 @@ def api_bulk_approve():
     return jsonify({'approved': results, 'errors': errors})
 
 
+@app.route('/api/reclassify', methods=['POST'])
+def api_reclassify():
+    """Re-run classification on pending_review (and optionally out_of_scope) emails
+    using current departments, contacts, and custom rules."""
+    if scan_state['status'] == 'scanning':
+        return jsonify({'message': 'A scan is already in progress'}), 409
+
+    data = request.get_json(silent=True) or {}
+    include_out_of_scope = data.get('include_out_of_scope', False)
+
+    def _run_reclassify():
+        if not scan_lock.acquire(blocking=False):
+            return
+        try:
+            scan_state['status'] = 'scanning'
+            _ensure_logging()
+            rlogger = logging.getLogger(__name__)
+            rlogger.info("Dashboard: starting re-classification")
+
+            from email_interface.classifier import create_classifier
+            from email_interface.config import load_config, resolve_path
+
+            class_cfg = load_config(resolve_path('config/classification_config.yaml', BASE_DIR))
+            tracker = _get_tracker()
+
+            departments = tracker.get_departments(active_only=True)
+            contacts = tracker.get_contacts(active_only=True)
+            method_override = tracker.get_setting('classifier_method')
+            custom_instructions = tracker.get_setting('classifier_instructions')
+            classifier = create_classifier(
+                class_cfg, departments=departments, method=method_override,
+                custom_instructions=custom_instructions, contacts=contacts,
+            )
+
+            counts = {'total': 0, 'unchanged': 0, 'moved_to_out_of_scope': 0,
+                       'moved_to_review': 0, 'dept_updated': 0, 'errors': 0}
+
+            # Fetch emails to re-classify
+            statuses = ['pending_review']
+            if include_out_of_scope:
+                statuses.append('out_of_scope')
+
+            conn = sqlite3.connect(_get_db_path())
+            conn.row_factory = sqlite3.Row
+            for status in statuses:
+                rows = conn.execute(
+                    """SELECT id, message_id, sender, sender_name, subject, body,
+                              to_recipients, cc_recipients, attachment_count,
+                              doc_type, discipline, department, status
+                       FROM pending_emails WHERE status = ?""",
+                    (status,)
+                ).fetchall()
+                counts['total'] += len(rows)
+
+                for row in rows:
+                    try:
+                        msg_data = {
+                            'sender': row['sender'] or '',
+                            'sender_name': row['sender_name'] or '',
+                            'subject': row['subject'] or '',
+                            'body': row['body'] or '',
+                            'to': json.loads(row['to_recipients'] or '[]'),
+                            'cc': json.loads(row['cc_recipients'] or '[]'),
+                            'attachments': [],  # no blobs needed for classification
+                        }
+
+                        # Re-check scope
+                        in_scope = classifier.is_in_scope(msg_data)
+
+                        if not in_scope and row['status'] == 'pending_review':
+                            # Was in review, now out of scope
+                            conn.execute(
+                                "UPDATE pending_emails SET status = 'out_of_scope', "
+                                "doc_type = '', discipline = '', department = '', "
+                                "classifier_method = ? WHERE id = ?",
+                                (getattr(classifier, 'name', ''), row['id']),
+                            )
+                            counts['moved_to_out_of_scope'] += 1
+                            rlogger.info("Re-classify: moved to out_of_scope: [%d] %s",
+                                         row['id'], row['subject'])
+                            continue
+
+                        if in_scope and row['status'] == 'out_of_scope':
+                            # Was out of scope, now in scope — move to review
+                            result = classifier.classify(msg_data)
+                            conn.execute(
+                                """UPDATE pending_emails SET status = 'pending_review',
+                                   doc_type = ?, discipline = ?, department = ?,
+                                   response_required = ?, references_json = ?,
+                                   confidence = ?, classifier_method = ?
+                                   WHERE id = ?""",
+                                (result.doc_type, result.discipline, result.department,
+                                 int(result.response_required),
+                                 json.dumps(result.references),
+                                 result.confidence,
+                                 getattr(classifier, 'name', ''),
+                                 row['id']),
+                            )
+                            counts['moved_to_review'] += 1
+                            rlogger.info("Re-classify: moved to pending_review: [%d] %s",
+                                         row['id'], row['subject'])
+                            continue
+
+                        if in_scope and row['status'] == 'pending_review':
+                            # Still in scope — re-classify to update department/type/etc
+                            result = classifier.classify(msg_data)
+                            old_dept = row['department'] or ''
+                            new_dept = result.department or ''
+                            changed = (
+                                old_dept != new_dept
+                                or (row['doc_type'] or '') != result.doc_type
+                                or (row['discipline'] or '') != result.discipline
+                            )
+                            if changed:
+                                conn.execute(
+                                    """UPDATE pending_emails SET
+                                       doc_type = ?, discipline = ?, department = ?,
+                                       response_required = ?, references_json = ?,
+                                       confidence = ?, classifier_method = ?
+                                       WHERE id = ?""",
+                                    (result.doc_type, result.discipline, result.department,
+                                     int(result.response_required),
+                                     json.dumps(result.references),
+                                     result.confidence,
+                                     getattr(classifier, 'name', ''),
+                                     row['id']),
+                                )
+                                counts['dept_updated'] += 1
+                                if old_dept != new_dept:
+                                    rlogger.info("Re-classify: dept %s→%s: [%d] %s",
+                                                 old_dept or '(none)', new_dept or '(none)',
+                                                 row['id'], row['subject'])
+                            else:
+                                counts['unchanged'] += 1
+                    except Exception as e:
+                        rlogger.error("Re-classify error for id %d: %s", row['id'], e)
+                        counts['errors'] += 1
+
+            conn.commit()
+            conn.close()
+            tracker.close()
+
+            scan_state['status'] = 'idle'
+            scan_state['last_scan_time'] = datetime.now().isoformat()
+            parts = [f"{counts['total']} checked"]
+            if counts['moved_to_out_of_scope']:
+                parts.append(f"{counts['moved_to_out_of_scope']} moved to out-of-scope")
+            if counts['moved_to_review']:
+                parts.append(f"{counts['moved_to_review']} moved to review")
+            if counts['dept_updated']:
+                parts.append(f"{counts['dept_updated']} updated")
+            if counts['unchanged']:
+                parts.append(f"{counts['unchanged']} unchanged")
+            scan_state['last_scan_result'] = "RE-CLASSIFY: " + ', '.join(parts)
+            scan_state['last_scan_ok'] = counts['errors'] == 0
+            rlogger.info("Re-classification complete: %s", scan_state['last_scan_result'])
+
+        except Exception as e:
+            scan_state['status'] = 'error'
+            scan_state['last_scan_time'] = datetime.now().isoformat()
+            scan_state['last_scan_result'] = f"Re-classify error: {e}"
+            scan_state['last_scan_ok'] = False
+            logging.getLogger(__name__).error("Re-classify failed: %s", e, exc_info=True)
+        finally:
+            scan_lock.release()
+
+    t = threading.Thread(target=_run_reclassify, daemon=True)
+    t.start()
+    return jsonify({'message': 'Re-classification started'}), 202
+
+
 @app.route('/api/pending/bulk-reject', methods=['POST'])
 def api_bulk_reject():
     data = request.get_json(silent=True) or {}

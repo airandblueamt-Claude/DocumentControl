@@ -66,12 +66,13 @@ class RuleBasedClassifier(EmailClassifier):
     def name(self):
         return "Keywords"
 
-    def __init__(self, config, departments=None, custom_instructions=None):
+    def __init__(self, config, departments=None, custom_instructions=None, contacts=None):
         """
         Args:
             config: classification_config dict (from YAML)
             departments: list of department dicts [{name, keywords (JSON string), ...}]
             custom_instructions: ignored for rule-based (kept for uniform signature)
+            contacts: list of contact dicts [{email, department, company, ...}]
         """
         self.scope_keywords = [kw.lower() for kw in config.get('scope_keywords', [])]
         self.ref_regexes = [re.compile(p) for p in config.get('ref_regexes', [])]
@@ -96,6 +97,15 @@ class RuleBasedClassifier(EmailClassifier):
                     keywords = [k.lower() for k in kw_raw]
                 self.departments[name] = keywords
 
+        # Build contact email → department lookup
+        self.contact_map = {}  # email.lower() → department
+        if contacts:
+            for c in contacts:
+                email = (c.get('email') or '').strip().lower()
+                dept = (c.get('department') or '').strip()
+                if email:
+                    self.contact_map[email] = dept
+
     def _get_text(self, msg_data):
         """Combine subject + body for keyword matching."""
         return f"{msg_data.get('subject', '')} {msg_data.get('body', '')}".lower()
@@ -110,7 +120,12 @@ class RuleBasedClassifier(EmailClassifier):
         return False
 
     def is_in_scope(self, msg_data):
-        """Scope check: matches scope_keywords OR ref patterns OR type_keywords OR doc attachments."""
+        """Scope check: known contact OR scope_keywords OR ref patterns OR type_keywords OR doc attachments."""
+        # Known contacts are always in scope
+        sender = (msg_data.get('sender') or '').strip().lower()
+        if sender and sender in self.contact_map:
+            return True
+
         text = self._get_text(msg_data)
 
         # Check scope keywords
@@ -160,15 +175,21 @@ class RuleBasedClassifier(EmailClassifier):
             if discipline != 'General':
                 break
 
-        # Department (from SQLite departments)
+        # Department — check sender against contacts first
         department = ''
-        for dept_name, keywords in self.departments.items():
-            for kw in keywords:
-                if kw in text:
-                    department = dept_name
+        sender = (msg_data.get('sender') or '').strip().lower()
+        if sender and sender in self.contact_map and self.contact_map[sender]:
+            department = self.contact_map[sender]
+
+        # Fall back to keyword matching if no contact match
+        if not department:
+            for dept_name, keywords in self.departments.items():
+                for kw in keywords:
+                    if kw in text:
+                        department = dept_name
+                        break
+                if department:
                     break
-            if department:
-                break
 
         # Response required
         response_required = False
@@ -201,8 +222,8 @@ class RuleBasedClassifier(EmailClassifier):
 class LLMClassifierBase(EmailClassifier):
     """Shared logic for all LLM-based classifiers (prompt building, email summary, fallback)."""
 
-    def __init__(self, config, departments=None, custom_instructions=None):
-        self._fallback = RuleBasedClassifier(config, departments)
+    def __init__(self, config, departments=None, custom_instructions=None, contacts=None):
+        self._fallback = RuleBasedClassifier(config, departments, contacts=contacts)
 
         self._scope_keywords = config.get('scope_keywords', [])
         self._type_keywords = config.get('type_keywords', {})
@@ -213,6 +234,7 @@ class LLMClassifierBase(EmailClassifier):
         if departments:
             self._dept_names = [d['name'] for d in departments]
 
+        self._contacts = contacts or []
         self._custom_instructions = custom_instructions or ''
         self._max_body_chars = 2000
         self._fallback_on_error = True
@@ -261,13 +283,24 @@ class LLMClassifierBase(EmailClassifier):
         return '\n'.join(parts)
 
     def _build_scope_system_prompt(self):
-        return (
+        prompt = (
             "You are a document control assistant. Determine if the following email "
             "is related to document control, construction project management, or "
             "engineering correspondence.\n\n"
             f"Scope keywords for reference: {', '.join(self._scope_keywords)}\n\n"
-            "Reply with ONLY valid JSON: {\"in_scope\": true/false, \"reason\": \"brief explanation\"}"
         )
+
+        # Add known contacts — emails from known contacts are always in scope
+        if self._contacts:
+            contact_lines = [f"- {c.get('email', '')} ({c.get('name', '')}, {c.get('company', '')})"
+                             for c in self._contacts if c.get('email')]
+            prompt += (
+                "Known project contacts (emails from these senders are ALWAYS in scope):\n"
+                + '\n'.join(contact_lines) + "\n\n"
+            )
+
+        prompt += "Reply with ONLY valid JSON: {\"in_scope\": true/false, \"reason\": \"brief explanation\"}"
+        return prompt
 
     def _build_classify_system_prompt(self):
         doc_types = list(self._type_keywords.keys())
@@ -302,6 +335,25 @@ class LLMClassifierBase(EmailClassifier):
                 "--- CUSTOM INSTRUCTIONS ---\n"
                 f"{self._custom_instructions}\n"
                 "--- END CUSTOM INSTRUCTIONS ---\n\n"
+            )
+
+        # Add known contacts with department mapping
+        if self._contacts:
+            contact_lines = []
+            for c in self._contacts:
+                email = c.get('email', '')
+                name = c.get('name', '')
+                dept = c.get('department', '')
+                company = c.get('company', '')
+                line = f"- {email} → {name}"
+                if company:
+                    line += f" ({company})"
+                if dept:
+                    line += f" → Department: {dept}"
+                contact_lines.append(line)
+            prompt += (
+                "Known contacts (use these to determine department):\n"
+                + '\n'.join(contact_lines) + "\n\n"
             )
 
         prompt += (
@@ -352,8 +404,8 @@ class ClaudeAPIClassifier(LLMClassifierBase):
     def name(self):
         return "Claude"
 
-    def __init__(self, config, departments=None, custom_instructions=None):
-        super().__init__(config, departments, custom_instructions)
+    def __init__(self, config, departments=None, custom_instructions=None, contacts=None):
+        super().__init__(config, departments, custom_instructions, contacts=contacts)
         import anthropic as _anthropic
         self._anthropic = _anthropic
 
@@ -413,8 +465,8 @@ class GeminiClassifier(LLMClassifierBase):
     def name(self):
         return "Gemini"
 
-    def __init__(self, config, departments=None, custom_instructions=None):
-        super().__init__(config, departments, custom_instructions)
+    def __init__(self, config, departments=None, custom_instructions=None, contacts=None):
+        super().__init__(config, departments, custom_instructions, contacts=contacts)
         from google import genai as _genai
         self._genai = _genai
 
@@ -507,8 +559,8 @@ class GroqClassifier(LLMClassifierBase):
     def name(self):
         return "Groq"
 
-    def __init__(self, config, departments=None, custom_instructions=None):
-        super().__init__(config, departments, custom_instructions)
+    def __init__(self, config, departments=None, custom_instructions=None, contacts=None):
+        super().__init__(config, departments, custom_instructions, contacts=contacts)
         import groq as _groq
         self._groq = _groq
 
@@ -615,7 +667,7 @@ class FallbackChainClassifier(EmailClassifier):
 # Factory
 # ---------------------------------------------------------------------------
 
-def create_classifier(config, departments=None, method=None, custom_instructions=None):
+def create_classifier(config, departments=None, method=None, custom_instructions=None, contacts=None):
     """Factory function to create the appropriate classifier.
 
     Args:
@@ -624,32 +676,33 @@ def create_classifier(config, departments=None, method=None, custom_instructions
         method: 'rule_based', 'claude_api', 'gemini', 'groq', or 'auto'.
                 Defaults to config value.
         custom_instructions: optional string with user-defined AI instructions
+        contacts: list of contact dicts from SQLite
     """
     if method is None:
         method = config.get('classifier', {}).get('method', 'rule_based')
 
     if method == 'rule_based':
-        return RuleBasedClassifier(config, departments, custom_instructions)
+        return RuleBasedClassifier(config, departments, custom_instructions, contacts=contacts)
     elif method == 'claude_api':
-        return ClaudeAPIClassifier(config, departments, custom_instructions)
+        return ClaudeAPIClassifier(config, departments, custom_instructions, contacts=contacts)
     elif method == 'gemini':
-        return GeminiClassifier(config, departments, custom_instructions)
+        return GeminiClassifier(config, departments, custom_instructions, contacts=contacts)
     elif method == 'groq':
-        return GroqClassifier(config, departments, custom_instructions)
+        return GroqClassifier(config, departments, custom_instructions, contacts=contacts)
     elif method == 'auto':
-        return _build_auto_chain(config, departments, custom_instructions)
+        return _build_auto_chain(config, departments, custom_instructions, contacts=contacts)
     else:
         raise ValueError(f"Unknown classifier method: {method}")
 
 
-def _build_auto_chain(config, departments, custom_instructions=None):
+def _build_auto_chain(config, departments, custom_instructions=None, contacts=None):
     """Build a FallbackChainClassifier from whichever API keys are present."""
     chain = []
 
     # Try Gemini first (free tier)
     if os.environ.get('GEMINI_API_KEY'):
         try:
-            chain.append(GeminiClassifier(config, departments, custom_instructions))
+            chain.append(GeminiClassifier(config, departments, custom_instructions, contacts=contacts))
             logger.info("Auto classifier: Gemini enabled")
         except Exception as exc:
             logger.warning("Auto classifier: Gemini init failed (%s)", exc)
@@ -657,7 +710,7 @@ def _build_auto_chain(config, departments, custom_instructions=None):
     # Then Groq (free tier)
     if os.environ.get('GROQ_API_KEY'):
         try:
-            chain.append(GroqClassifier(config, departments, custom_instructions))
+            chain.append(GroqClassifier(config, departments, custom_instructions, contacts=contacts))
             logger.info("Auto classifier: Groq enabled")
         except Exception as exc:
             logger.warning("Auto classifier: Groq init failed (%s)", exc)
@@ -665,13 +718,13 @@ def _build_auto_chain(config, departments, custom_instructions=None):
     # Then Claude (paid)
     if os.environ.get('ANTHROPIC_API_KEY'):
         try:
-            chain.append(ClaudeAPIClassifier(config, departments, custom_instructions))
+            chain.append(ClaudeAPIClassifier(config, departments, custom_instructions, contacts=contacts))
             logger.info("Auto classifier: Claude API enabled")
         except Exception as exc:
             logger.warning("Auto classifier: Claude API init failed (%s)", exc)
 
     # Always end with rule-based
-    chain.append(RuleBasedClassifier(config, departments, custom_instructions))
+    chain.append(RuleBasedClassifier(config, departments, custom_instructions, contacts=contacts))
     logger.info("Auto classifier: RuleBasedClassifier as final fallback")
 
     if len(chain) == 1:
