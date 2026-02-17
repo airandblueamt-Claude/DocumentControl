@@ -17,10 +17,14 @@ from dashboard import app, start_scheduler, _get_tracker, _get_class_cfg, _ensur
 # Set up logging
 _ensure_logging()
 
-# Seed departments on startup
+# Seed departments on startup + one-time conversation backfill
 tracker = _get_tracker()
 class_cfg = _get_class_cfg()
 tracker.seed_default_departments(class_cfg.get('discipline_keywords', {}))
+if not tracker.get_setting('conversations_backfilled'):
+    logging.getLogger(__name__).info("Running one-time conversation backfill...")
+    tracker.backfill_conversations()
+    tracker.set_setting('conversations_backfilled', '1')
 tracker.close()
 
 # Start the background email scanner

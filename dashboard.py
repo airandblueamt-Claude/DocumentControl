@@ -512,12 +512,12 @@ def api_emails():
         total_pages = max(1, (total_matching + per_page - 1) // per_page)
         page = min(page, total_pages - 1)
 
-        # Fetch page
+        # Fetch page — get all emails then group by transmittal
         cur = conn.execute(
             f"""SELECT transmittal_no, processed_at, sender, sender_name,
                       to_recipients, cc_recipients, subject, attachment_count,
                       doc_type, discipline, department, response_required, references_json,
-                      conversation_id
+                      conversation_id, message_id
                FROM processed_messages {base_where}
                ORDER BY processed_at DESC LIMIT ? OFFSET ?""",
             params + [per_page, page * per_page],
@@ -530,6 +530,18 @@ def api_emails():
             e['sender_known'] = contact is not None
             e['thread_count'] = tracker.get_thread_count(e.get('conversation_id')) if e.get('conversation_id') else 0
             emails.append(e)
+
+        # Group emails by transmittal_no — first occurrence is parent, rest are follow-ups
+        from collections import OrderedDict
+        groups = OrderedDict()
+        for e in emails:
+            tn = e.get('transmittal_no', '')
+            if tn not in groups:
+                e['follow_ups'] = []
+                groups[tn] = e
+            else:
+                groups[tn]['follow_ups'].append(e)
+        emails = list(groups.values())
 
         # Stats (unfiltered)
         total = conn.execute("SELECT COUNT(*) FROM processed_messages").fetchone()[0]

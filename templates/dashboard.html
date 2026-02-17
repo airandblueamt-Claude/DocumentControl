@@ -411,6 +411,27 @@
         .conv-timeline-link { cursor: pointer; }
         .conv-timeline-link:hover { color: var(--primary); }
 
+        /* Processed table: expand/collapse follow-ups */
+        .expand-btn {
+            background: none; border: 1px solid var(--border); border-radius: 4px;
+            cursor: pointer; font-size: 10px; font-weight: 700;
+            padding: 2px 8px; color: var(--primary); transition: all .15s;
+            white-space: nowrap;
+        }
+        .expand-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .follow-up-row td { background: var(--bg); font-size: 11px; }
+        .follow-up-row td:first-child { padding-left: 28px; }
+        .follow-up-indicator { color: var(--text-light); font-size: 10px; margin-right: 4px; }
+        [data-theme="dark"] .follow-up-row td { background: #0f172a; }
+        /* Mobile follow-up card */
+        .follow-up-card {
+            margin-left: 16px; border-left: 2px solid var(--primary);
+            padding: 8px 12px; font-size: 12px;
+            background: var(--bg); border-radius: 0 var(--radius) var(--radius) 0;
+        }
+        .follow-up-card .card-meta { font-size: 11px; }
+        [data-theme="dark"] .follow-up-card { background: #0f172a; }
+
         /* Attachments */
         .att-list { display: flex; flex-direction: column; gap: 2px; }
         .att-list a {
@@ -912,15 +933,18 @@
                     <div class="clf-keys" id="classifierKeys"></div>
                     <div class="ai-instructions">
                         <div class="ai-instructions-header" onclick="toggleAiInstructions()">
-                            <span class="ctrl-label">AI Instructions</span>
+                            <span class="ctrl-label">Custom Classification Rules</span>
                             <span class="ai-instructions-toggle" id="aiInstrToggle">&#9660;</span>
                         </div>
                         <div class="ai-instructions-body" id="aiInstrBody">
-                            <textarea class="ai-textarea" id="aiInstructionsText" rows="4"
-                                placeholder="Add custom instructions... e.g. 'Emails about datacenter relocation go to Networking department. MoM emails are Minutes of Meeting type.'"></textarea>
+                            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.5">
+                                Tell the AI how to classify your emails. These rules are sent to the classifier when it processes each incoming email. Write in plain English.
+                            </div>
+                            <textarea class="ai-textarea" id="aiInstructionsText" rows="5"
+                                placeholder="Example rules:&#10;&#10;- Emails from @acme.com about 'site inspection' go to Civil department&#10;- 'MoM' or 'Minutes of Meeting' = doc type Meeting Minutes&#10;- Anything about fire alarm or sprinkler = MEP department&#10;- Submittal review emails from john@contractor.com = Architectural"></textarea>
                             <div class="ai-instructions-actions">
                                 <span class="ai-instructions-meta" id="aiInstrMeta"></span>
-                                <button class="btn btn-primary btn-sm" onclick="saveAiInstructions()">Save Instructions</button>
+                                <button class="btn btn-primary btn-sm" onclick="saveAiInstructions()">Save Rules</button>
                             </div>
                         </div>
                     </div>
@@ -1660,6 +1684,15 @@ function fetchEmails(page){
     }).catch(function(){});
 }
 
+function toggleFollowUps(tn){
+    var rows=document.querySelectorAll('.fu-row-'+CSS.escape(tn));
+    var cards=document.querySelectorAll('.fu-card-'+CSS.escape(tn));
+    var btn=document.getElementById('expand-'+tn);
+    var showing=rows.length>0&&rows[0].style.display!=='none';
+    rows.forEach(function(r){r.style.display=showing?'none':'table-row';});
+    cards.forEach(function(c){c.style.display=showing?'none':'block';});
+    if(btn) btn.textContent=showing?'+'+rows.length:'−';
+}
 function renderProcessedTable(){
     var wrap=document.getElementById('emailTableWrap');
     var items=processedEmails;
@@ -1671,22 +1704,38 @@ function renderProcessedTable(){
     html += '<div class="email-cards">';
     for(var i=0;i<items.length;i++){
         var e=items[i];
+        var fups=e.follow_ups||[];
+        var fuCount=fups.length;
         html+='<div class="email-card">';
         html+='<div class="card-row"><div style="flex:1;min-width:0">';
-        var tcLabel = e.thread_count > 1 ? ' <span class="thread-badge thread-count">' + e.thread_count + ' emails</span>' : '';
-        html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+tcLabel+'</div>';
+        var fuLabel=fuCount>0?' <span class="thread-badge thread-count">'+(fuCount+1)+' emails</span>':'';
+        html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+fuLabel+'</div>';
         html+='<div class="card-subject" style="color:var(--text);cursor:default">'+esc(e.subject||'(no subject)')+'</div>';
         html+='<div class="card-meta">';
         html+='<span>'+esc(e.sender_name||e.sender)+'</span>';
         html+='<span>'+fmtTime(e.processed_at)+'</span>';
         if(e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
         if(e.response_required) html+='<span class="resp-yes">Response needed</span>';
-        html+='</div></div></div>';
+        html+='</div></div>';
+        if(fuCount>0) html+='<button class="expand-btn" id="expand-'+esc(e.transmittal_no)+'" onclick="toggleFollowUps(\''+esc(e.transmittal_no)+'\')">+'+fuCount+'</button>';
+        html+='</div>';
         html+='<div class="card-tags">';
         if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
         if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
         if(e.department) html+='<span class="card-tag">'+esc(e.department)+'</span>';
         html+='</div></div>';
+        // Follow-up cards (hidden by default)
+        for(var fi=0;fi<fups.length;fi++){
+            var fu=fups[fi];
+            html+='<div class="follow-up-card fu-card-'+esc(e.transmittal_no)+'" style="display:none">';
+            html+='<div class="card-meta"><span class="follow-up-indicator">&#8627;</span>';
+            html+='<span>'+esc(fu.sender_name||fu.sender)+'</span>';
+            html+='<span>'+fmtTime(fu.processed_at)+'</span>';
+            if(fu.attachment_count) html+='<span>'+fu.attachment_count+' att.</span>';
+            html+='</div>';
+            html+='<div style="margin-top:2px;color:var(--text)">'+esc(fu.subject||'(no subject)')+'</div>';
+            html+='</div>';
+        }
     }
     html += '</div>';
 
@@ -1697,22 +1746,37 @@ function renderProcessedTable(){
         '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
     for(var i=0;i<items.length;i++){
         var e=items[i], idx=page*perPage+i+1;
+        var fups=e.follow_ups||[];
         var sd=esc(e.sender_name||e.sender);
         if(e.sender_company) sd+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
         var rc=e.response_required?'resp-yes':'resp-no', rt=e.response_required?'Yes':'No';
-        var tcBadge = e.thread_count > 1 ? ' <span class="thread-badge thread-count">' + e.thread_count + '</span>' : '';
+        var fuBtn=fups.length>0?'<button class="expand-btn" id="expand-'+esc(e.transmittal_no)+'" onclick="toggleFollowUps(\''+esc(e.transmittal_no)+'\')">+'+fups.length+'</button>':'';
         html+='<tr><td class="col-num">'+idx+'</td>'+
-            '<td><strong>'+esc(e.transmittal_no)+'</strong>'+tcBadge+'</td>'+
+            '<td><strong>'+esc(e.transmittal_no)+'</strong> '+fuBtn+'</td>'+
             '<td style="white-space:nowrap">'+fmtTime(e.processed_at)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
             '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.department||'')+'</td>'+
             '<td><span class="'+rc+'">'+rt+'</span></td><td>'+(e.attachment_count||0)+'</td></tr>';
+        // Follow-up rows (hidden by default)
+        for(var fi=0;fi<fups.length;fi++){
+            var fu=fups[fi];
+            var fsd=esc(fu.sender_name||fu.sender);
+            if(fu.sender_company) fsd+='<span class="sender-company">'+esc(fu.sender_company)+'</span>';
+            html+='<tr class="follow-up-row fu-row-'+esc(e.transmittal_no)+'" style="display:none">'+
+                '<td></td>'+
+                '<td><span class="follow-up-indicator">&#8627;</span></td>'+
+                '<td style="white-space:nowrap">'+fmtTime(fu.processed_at)+'</td>'+
+                '<td class="col-sender" title="'+esc(fu.sender)+'">'+fsd+'</td>'+
+                '<td class="col-subject">'+esc(fu.subject)+'</td>'+
+                '<td>'+esc(fu.doc_type||'')+'</td><td>'+esc(fu.discipline||'')+'</td><td>'+esc(fu.department||'')+'</td>'+
+                '<td></td><td>'+(fu.attachment_count||0)+'</td></tr>';
+        }
     }
     html+='</tbody></table></div>';
     // Server-side pagination
     if(processedServerPages>1){
-        var totalItems=(processedServerPages*perPage); // approximate
+        var totalItems=(processedServerPages*perPage);
         var from=page*perPage+1, to=page*perPage+items.length;
         html+='<div class="table-footer"><span>'+from+'-'+to+'</span><div class="pagination">';
         html+='<button class="page-btn" onclick="fetchEmails('+(page-1)+')"'+(page===0?' disabled':'')+'>&laquo;</button>';

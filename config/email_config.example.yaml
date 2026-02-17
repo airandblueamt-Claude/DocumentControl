@@ -29,7 +29,7 @@ attachments:
   base_path: "Attachments"
   organization: "by_date"  # Creates YYYY/MM-Month/TRN-YYYY-NNNN/
   max_size_mb: 25
-  allowed_extensions: [".pdf", ".docx", ".xlsx", ".msg", ".jpg", ".png", ".zip"]
+  allowed_extensions: [".pdf", ".pptx", ".ppt", ".xlsx", ".xls"]
   skip_signature_attachments: true  # Filter out signature images (logos, banners, social icons)
 
 # Excel Output
