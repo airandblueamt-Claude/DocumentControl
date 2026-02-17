@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime
 
@@ -88,6 +89,18 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT,
     updated_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    normalized_subject TEXT NOT NULL,
+    transmittal_no TEXT,
+    email_count INTEGER DEFAULT 1,
+    first_message_id TEXT,
+    last_message_id TEXT,
+    first_date TIMESTAMP,
+    last_date TIMESTAMP,
+    created_at TIMESTAMP
+);
 """
 
 # Columns added after initial schema - handled via migration
@@ -102,6 +115,11 @@ _MIGRATIONS = [
     ("pending_emails", "confidence", "REAL"),
     ("departments", "description", "TEXT"),
     ("pending_emails", "body_html", "TEXT"),
+    ("pending_emails", "in_reply_to", "TEXT"),
+    ("pending_emails", "email_references", "TEXT"),
+    ("pending_emails", "conversation_id", "INTEGER"),
+    ("pending_emails", "conversation_position", "INTEGER DEFAULT 1"),
+    ("processed_messages", "conversation_id", "INTEGER"),
 ]
 
 
@@ -147,8 +165,9 @@ class ProcessingTracker:
             """INSERT OR IGNORE INTO processed_messages
                (message_id, transmittal_no, processed_at, sender, sender_name,
                 to_recipients, cc_recipients, subject, attachment_count,
-                doc_type, discipline, department, response_required, references_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                doc_type, discipline, department, response_required, references_json,
+                conversation_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 message_id,
                 transmittal_no,
@@ -164,6 +183,7 @@ class ProcessingTracker:
                 msg_data.get('department', ''),
                 1 if msg_data.get('response_required') else 0,
                 json.dumps(refs) if isinstance(refs, list) else refs,
+                msg_data.get('conversation_id'),
             ),
         )
         self._conn.commit()
@@ -222,8 +242,9 @@ class ProcessingTracker:
                 to_recipients, cc_recipients, subject, email_date, body,
                 doc_type, discipline, department, response_required,
                 references_json, attachment_count, classifier_method, confidence,
-                body_html)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                body_html, in_reply_to, email_references,
+                conversation_id, conversation_position)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_data.get('message_id', ''),
                 status,
@@ -244,6 +265,10 @@ class ProcessingTracker:
                 classification.get('classifier_method', ''),
                 classification.get('confidence'),
                 msg_data.get('body_html', ''),
+                msg_data.get('in_reply_to', ''),
+                msg_data.get('email_references', ''),
+                msg_data.get('conversation_id'),
+                msg_data.get('conversation_position', 1),
             ),
         )
         self._conn.commit()
@@ -269,7 +294,8 @@ class ProcessingTracker:
                       to_recipients, cc_recipients, subject, email_date,
                       doc_type, discipline, department, response_required,
                       references_json, attachment_count, transmittal_no,
-                      classifier_method, confidence
+                      classifier_method, confidence,
+                      conversation_id, conversation_position
                FROM pending_emails WHERE status = ?
                ORDER BY scanned_at DESC LIMIT ?""",
             (status, limit),
@@ -359,8 +385,9 @@ class ProcessingTracker:
             """INSERT OR IGNORE INTO processed_messages
                (message_id, transmittal_no, processed_at, sender, sender_name,
                 to_recipients, cc_recipients, subject, attachment_count,
-                doc_type, discipline, department, response_required, references_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                doc_type, discipline, department, response_required, references_json,
+                conversation_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 pe['message_id'],
                 transmittal_no,
@@ -376,17 +403,19 @@ class ProcessingTracker:
                 pe.get('department', ''),
                 pe.get('response_required', 0),
                 pe.get('references_json', '[]'),
+                pe.get('conversation_id'),
             ),
         )
 
         # Update pending status
+        now = datetime.now().isoformat()
         self._conn.execute(
             """UPDATE pending_emails
                SET status = 'approved', decided_at = ?, transmittal_no = ?,
                    doc_type = ?, discipline = ?, department = ?
                WHERE id = ?""",
             (
-                datetime.now().isoformat(),
+                now,
                 transmittal_no,
                 pe['doc_type'],
                 pe['discipline'],
@@ -394,12 +423,59 @@ class ProcessingTracker:
                 pending_id,
             ),
         )
+
+        # Propagate transmittal to conversation and auto-approve siblings
+        auto_approved = []
+        conv_id = pe.get('conversation_id')
+        if conv_id:
+            self._conn.execute(
+                "UPDATE conversations SET transmittal_no = ? WHERE id = ? AND transmittal_no IS NULL",
+                (transmittal_no, conv_id),
+            )
+            # Find sibling pending emails in same conversation
+            cur_siblings = self._conn.execute(
+                """SELECT id FROM pending_emails
+                   WHERE conversation_id = ? AND id != ? AND status = 'pending_review'""",
+                (conv_id, pending_id),
+            )
+            sibling_ids = [row[0] for row in cur_siblings.fetchall()]
+            for sib_id in sibling_ids:
+                sib = self.get_pending_email(sib_id)
+                if not sib:
+                    continue
+                self._conn.execute(
+                    """UPDATE pending_emails
+                       SET status = 'approved', decided_at = ?, transmittal_no = ?
+                       WHERE id = ?""",
+                    (now, transmittal_no, sib_id),
+                )
+                # Copy sibling to processed_messages
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO processed_messages
+                       (message_id, transmittal_no, processed_at, sender, sender_name,
+                        to_recipients, cc_recipients, subject, attachment_count,
+                        doc_type, discipline, department, response_required,
+                        references_json, conversation_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        sib['message_id'], transmittal_no, now,
+                        sib['sender'], sib.get('sender_name', ''),
+                        sib.get('to_recipients', '[]'), sib.get('cc_recipients', '[]'),
+                        sib['subject'], sib['attachment_count'],
+                        sib.get('doc_type', ''), sib.get('discipline', ''),
+                        sib.get('department', ''), sib.get('response_required', 0),
+                        sib.get('references_json', '[]'), conv_id,
+                    ),
+                )
+                auto_approved.append(sib_id)
+                logger.info("Auto-approved sibling #%d -> %s", sib_id, transmittal_no)
+
         self._conn.commit()
 
         pe['transmittal_no'] = transmittal_no
         pe['status'] = 'approved'
         logger.info("Approved pending #%d -> %s", pending_id, transmittal_no)
-        return {'transmittal_no': transmittal_no, 'pending_email': pe}
+        return {'transmittal_no': transmittal_no, 'pending_email': pe, 'auto_approved': auto_approved}
 
     def reject_pending_email(self, pending_id):
         """Reject a pending email."""
@@ -631,6 +707,252 @@ class ProcessingTracker:
             (key, value, datetime.now().isoformat()),
         )
         self._conn.commit()
+
+    # --- Conversation Threading ---
+
+    def _normalize_subject(self, subject):
+        """Strip RE:/FW:/FWD: prefixes and normalize whitespace."""
+        if not subject:
+            return ''
+        cleaned = re.sub(r'^(\s*(re|fw|fwd)\s*:\s*)+', '', subject, flags=re.IGNORECASE)
+        return ' '.join(cleaned.split()).strip()
+
+    def find_or_create_conversation(self, msg_data):
+        """Find an existing conversation or create a new one.
+
+        Returns: (conversation_id, conversation_position, transmittal_no_or_None)
+        """
+        in_reply_to = msg_data.get('in_reply_to', '').strip()
+        email_refs = msg_data.get('email_references', '').strip()
+        subject = msg_data.get('subject', '')
+        message_id = msg_data.get('message_id', '')
+        email_date = msg_data.get('date')
+        if email_date and hasattr(email_date, 'isoformat'):
+            email_date = email_date.isoformat()
+
+        # Parse reference message IDs from headers
+        ref_ids = []
+        if in_reply_to:
+            ref_ids.append(in_reply_to)
+        if email_refs:
+            ref_ids.extend(email_refs.split())
+        # Deduplicate while preserving order
+        seen = set()
+        unique_refs = []
+        for rid in ref_ids:
+            rid = rid.strip()
+            if rid and rid not in seen:
+                seen.add(rid)
+                unique_refs.append(rid)
+
+        conv_id = None
+
+        # Strategy A: Header match — look up referenced message IDs
+        if unique_refs:
+            placeholders = ','.join(['?'] * len(unique_refs))
+            # Check pending_emails
+            cur = self._conn.execute(
+                f"SELECT conversation_id FROM pending_emails WHERE message_id IN ({placeholders}) AND conversation_id IS NOT NULL LIMIT 1",
+                unique_refs,
+            )
+            row = cur.fetchone()
+            if row:
+                conv_id = row[0]
+            else:
+                # Check processed_messages
+                cur = self._conn.execute(
+                    f"SELECT conversation_id FROM processed_messages WHERE message_id IN ({placeholders}) AND conversation_id IS NOT NULL LIMIT 1",
+                    unique_refs,
+                )
+                row = cur.fetchone()
+                if row:
+                    conv_id = row[0]
+
+        # Strategy B: Subject match
+        if not conv_id:
+            norm_subj = self._normalize_subject(subject)
+            if norm_subj:
+                cur = self._conn.execute(
+                    "SELECT id FROM conversations WHERE normalized_subject = ? LIMIT 1",
+                    (norm_subj,),
+                )
+                row = cur.fetchone()
+                if row:
+                    conv_id = row[0]
+
+        # Strategy C: Create new conversation
+        if not conv_id:
+            norm_subj = self._normalize_subject(subject)
+            now = datetime.now().isoformat()
+            cur = self._conn.execute(
+                """INSERT INTO conversations
+                   (normalized_subject, email_count, first_message_id, last_message_id,
+                    first_date, last_date, created_at)
+                   VALUES (?, 1, ?, ?, ?, ?, ?)""",
+                (norm_subj, message_id, message_id, email_date, email_date, now),
+            )
+            self._conn.commit()
+            conv_id = cur.lastrowid
+            return (conv_id, 1, None)
+
+        # Update existing conversation counters
+        self._conn.execute(
+            """UPDATE conversations
+               SET email_count = email_count + 1,
+                   last_message_id = ?,
+                   last_date = ?
+               WHERE id = ?""",
+            (message_id, email_date, conv_id),
+        )
+        self._conn.commit()
+
+        # Get conversation position and transmittal
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            "SELECT email_count, transmittal_no FROM conversations WHERE id = ?",
+            (conv_id,),
+        )
+        row = cur.fetchone()
+        self._conn.row_factory = None
+        position = row['email_count'] if row else 1
+        transmittal = row['transmittal_no'] if row else None
+
+        return (conv_id, position, transmittal)
+
+    def get_conversation(self, conversation_id):
+        """Return a conversation row as dict."""
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            "SELECT * FROM conversations WHERE id = ?",
+            (conversation_id,),
+        )
+        row = cur.fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def get_conversation_emails(self, conversation_id):
+        """Return all emails in a conversation (pending + processed) ordered by date."""
+        emails = []
+        self._conn.row_factory = sqlite3.Row
+
+        # From pending_emails
+        cur = self._conn.execute(
+            """SELECT id, message_id, status, sender, sender_name, subject,
+                      email_date, transmittal_no, conversation_position,
+                      'pending' as source
+               FROM pending_emails
+               WHERE conversation_id = ?
+               ORDER BY email_date""",
+            (conversation_id,),
+        )
+        for row in cur.fetchall():
+            emails.append(dict(row))
+
+        # From processed_messages (only those not already in pending)
+        cur = self._conn.execute(
+            """SELECT message_id, sender, sender_name, subject,
+                      processed_at as email_date, transmittal_no,
+                      'processed' as source
+               FROM processed_messages
+               WHERE conversation_id = ?
+                 AND message_id NOT IN (
+                     SELECT message_id FROM pending_emails WHERE conversation_id = ?
+                 )
+               ORDER BY processed_at""",
+            (conversation_id, conversation_id),
+        )
+        for row in cur.fetchall():
+            emails.append(dict(row))
+
+        self._conn.row_factory = None
+        # Sort all by date
+        emails.sort(key=lambda e: e.get('email_date') or '')
+        return emails
+
+    def get_thread_count(self, conversation_id):
+        """Return the email_count for a conversation."""
+        if not conversation_id:
+            return 0
+        cur = self._conn.execute(
+            "SELECT email_count FROM conversations WHERE id = ?",
+            (conversation_id,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else 0
+
+    def backfill_conversations(self):
+        """One-time backfill: group existing emails without conversation_id into conversations."""
+        logger.info("Starting conversation backfill...")
+        count = 0
+
+        # Process pending_emails without conversation_id
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            """SELECT id, message_id, subject, email_date, in_reply_to, email_references,
+                      transmittal_no, status
+               FROM pending_emails
+               WHERE conversation_id IS NULL
+               ORDER BY email_date"""
+        )
+        pending_rows = [dict(row) for row in cur.fetchall()]
+
+        # Process processed_messages without conversation_id
+        cur = self._conn.execute(
+            """SELECT message_id, subject, processed_at as email_date, transmittal_no
+               FROM processed_messages
+               WHERE conversation_id IS NULL
+               ORDER BY processed_at"""
+        )
+        processed_rows = [dict(row) for row in cur.fetchall()]
+        self._conn.row_factory = None
+
+        # Backfill pending emails
+        for row in pending_rows:
+            msg_data = {
+                'message_id': row['message_id'],
+                'subject': row['subject'],
+                'date': row['email_date'],
+                'in_reply_to': row.get('in_reply_to', '') or '',
+                'email_references': row.get('email_references', '') or '',
+            }
+            conv_id, conv_pos, _ = self.find_or_create_conversation(msg_data)
+            self._conn.execute(
+                "UPDATE pending_emails SET conversation_id = ?, conversation_position = ? WHERE id = ?",
+                (conv_id, conv_pos, row['id']),
+            )
+            # If this email has a transmittal, set it on the conversation
+            if row.get('transmittal_no') and row.get('status') == 'approved':
+                self._conn.execute(
+                    "UPDATE conversations SET transmittal_no = ? WHERE id = ? AND transmittal_no IS NULL",
+                    (row['transmittal_no'], conv_id),
+                )
+            count += 1
+
+        # Backfill processed messages
+        for row in processed_rows:
+            msg_data = {
+                'message_id': row['message_id'],
+                'subject': row['subject'],
+                'date': row['email_date'],
+                'in_reply_to': '',
+                'email_references': '',
+            }
+            conv_id, conv_pos, _ = self.find_or_create_conversation(msg_data)
+            self._conn.execute(
+                "UPDATE processed_messages SET conversation_id = ? WHERE message_id = ?",
+                (conv_id, row['message_id']),
+            )
+            # Set transmittal on conversation
+            if row.get('transmittal_no'):
+                self._conn.execute(
+                    "UPDATE conversations SET transmittal_no = ? WHERE id = ? AND transmittal_no IS NULL",
+                    (row['transmittal_no'], conv_id),
+                )
+            count += 1
+
+        self._conn.commit()
+        logger.info("Backfill complete: %d emails assigned to conversations", count)
+        return count
 
     def close(self):
         self._conn.close()

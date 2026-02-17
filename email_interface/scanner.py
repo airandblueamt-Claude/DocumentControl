@@ -58,7 +58,7 @@ def scan_and_queue(base_dir=None):
 
     max_messages = email_cfg.get('polling', {}).get('max_messages_per_run', 50)
 
-    counts = {'scanned': 0, 'queued': 0, 'skipped': 0, 'out_of_scope': 0, 'errors': 0}
+    counts = {'scanned': 0, 'queued': 0, 'skipped': 0, 'out_of_scope': 0, 'errors': 0, 'auto_assigned': 0}
 
     try:
         imap_client.connect()
@@ -118,9 +118,52 @@ def scan_and_queue(base_dir=None):
                 # Classify
                 result = classifier.classify(msg_data)
 
-                # Store as pending (include classifier metadata)
+                # Threading: find or create conversation
+                conv_id, conv_pos, existing_transmittal = tracker.find_or_create_conversation(msg_data)
+                msg_data['conversation_id'] = conv_id
+                msg_data['conversation_position'] = conv_pos
+
                 classification = result.to_dict()
                 classification['classifier_method'] = getattr(classifier, 'name', '')
+
+                # Auto-assign follow-ups if conversation already has a transmittal
+                if existing_transmittal:
+                    pending_id = tracker.store_pending_email(
+                        msg_data, classification, status='approved')
+                    # Set transmittal on the pending record
+                    tracker._conn.execute(
+                        "UPDATE pending_emails SET transmittal_no = ? WHERE id = ?",
+                        (existing_transmittal, pending_id),
+                    )
+                    # Copy to processed_messages
+                    tracker.mark_processed(message_id, existing_transmittal, {
+                        **msg_data,
+                        'doc_type': classification.get('doc_type', ''),
+                        'discipline': classification.get('discipline', ''),
+                        'department': classification.get('department', ''),
+                        'response_required': classification.get('response_required', False),
+                        'references': classification.get('references', []),
+                    })
+                    tracker._conn.commit()
+
+                    # Store attachment blobs
+                    for att in msg_data.get('attachments', []):
+                        tracker.store_pending_attachment(
+                            pending_id,
+                            att.get('filename', 'unnamed'),
+                            att.get('content_type', 'application/octet-stream'),
+                            att.get('size', len(att.get('data', b''))),
+                            att.get('data', b''),
+                        )
+
+                    imap_client.mark_as_read(msg_id)
+                    counts['auto_assigned'] += 1
+                    logger.info("Auto-assigned follow-up to %s: %s - %s",
+                                existing_transmittal, message_id,
+                                msg_data.get('subject', ''))
+                    continue
+
+                # Store as pending (include classifier metadata)
                 pending_id = tracker.store_pending_email(msg_data, classification)
 
                 # Store attachment blobs
@@ -145,9 +188,9 @@ def scan_and_queue(base_dir=None):
                 logger.error("Failed to scan message %s: %s", msg_id, e, exc_info=True)
                 counts['errors'] += 1
 
-        logger.info("Scan complete: %d scanned, %d queued, %d skipped, %d out-of-scope, %d errors",
-                     counts['scanned'], counts['queued'], counts['skipped'],
-                     counts['out_of_scope'], counts['errors'])
+        logger.info("Scan complete: %d scanned, %d queued, %d auto-assigned, %d skipped, %d out-of-scope, %d errors",
+                     counts['scanned'], counts['queued'], counts['auto_assigned'],
+                     counts['skipped'], counts['out_of_scope'], counts['errors'])
 
     finally:
         tracker.close()

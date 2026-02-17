@@ -7,6 +7,14 @@ from email.utils import parseaddr, parsedate_to_datetime
 logger = logging.getLogger(__name__)
 
 
+def normalize_subject(subject):
+    """Strip RE:/FW:/FWD: prefixes and normalize whitespace."""
+    if not subject:
+        return ''
+    cleaned = re.sub(r'^(\s*(re|fw|fwd)\s*:\s*)+', '', subject, flags=re.IGNORECASE)
+    return ' '.join(cleaned.split()).strip()
+
+
 def _parse_address_list(header_value):
     """Parse a header like 'Name <email>, Name2 <email2>' into a list of dicts."""
     if not header_value:
@@ -114,6 +122,8 @@ class MessageProcessor:
             'body': body,
             'body_html': body_html,
             'attachments': attachments,
+            'in_reply_to': msg.get('In-Reply-To', '').strip(),
+            'email_references': msg.get('References', '').strip(),
         }
 
     def should_process(self, msg_data):

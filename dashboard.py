@@ -21,7 +21,7 @@ from openpyxl import Workbook
 
 import re
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))   
 logger = logging.getLogger(__name__)
 
 
@@ -176,6 +176,20 @@ def _count_messages(db_path):
         conn.close()
 
 
+def _ensure_backfill():
+    """Run one-time conversation backfill if not yet done."""
+    try:
+        tracker = _get_tracker()
+        if not tracker.get_setting('conversations_backfilled'):
+            logger.info("Running one-time conversation backfill...")
+            tracker.backfill_conversations()
+            tracker.set_setting('conversations_backfilled', '1')
+            logger.info("Conversation backfill complete.")
+        tracker.close()
+    except Exception as e:
+        logger.error("Backfill error: %s", e)
+
+
 def run_scan():
     """Execute a scan via scan_and_queue(), tracking state."""
     if not scan_lock.acquire(blocking=False):
@@ -185,6 +199,9 @@ def run_scan():
         scan_state['status'] = 'scanning'
         _ensure_logging()
         logger = logging.getLogger(__name__)
+
+        # Ensure conversation backfill on first scan
+        _ensure_backfill()
 
         logger.info("Dashboard: starting scan (scan_and_queue)")
         from email_interface.scanner import scan_and_queue
@@ -210,8 +227,9 @@ def run_scan():
 
         scan_state['status'] = 'idle'
         scan_state['last_scan_time'] = datetime.now().isoformat()
+        auto_str = f", {counts['auto_assigned']} auto-assigned" if counts.get('auto_assigned') else ''
         scan_state['last_scan_result'] = (
-            f"{counts['queued']} queued, {counts['out_of_scope']} out-of-scope, "
+            f"{counts['queued']} queued{auto_str}, {counts['out_of_scope']} out-of-scope, "
             f"{counts['skipped']} skipped"
         )
         scan_state['last_scan_ok'] = counts['errors'] == 0
@@ -458,7 +476,8 @@ def api_emails():
         cur = conn.execute(
             f"""SELECT transmittal_no, processed_at, sender, sender_name,
                       to_recipients, cc_recipients, subject, attachment_count,
-                      doc_type, discipline, department, response_required, references_json
+                      doc_type, discipline, department, response_required, references_json,
+                      conversation_id
                FROM processed_messages {base_where}
                ORDER BY processed_at DESC LIMIT ? OFFSET ?""",
             params + [per_page, page * per_page],
@@ -469,6 +488,7 @@ def api_emails():
             contact = tracker.find_contact_by_email(e.get('sender', ''))
             e['sender_company'] = contact['company'] if contact else ''
             e['sender_known'] = contact is not None
+            e['thread_count'] = tracker.get_thread_count(e.get('conversation_id')) if e.get('conversation_id') else 0
             emails.append(e)
 
         # Stats (unfiltered)
@@ -526,11 +546,14 @@ def api_pending():
     try:
         pending = tracker.get_pending_emails(status=status)
         stats = tracker.get_pending_stats()
-        # Enrich with contact info
+        # Enrich with contact info and thread data
         for email in pending:
             contact = tracker.find_contact_by_email(email.get('sender', ''))
             email['sender_company'] = contact['company'] if contact else ''
             email['sender_known'] = contact is not None
+            conv_id = email.get('conversation_id')
+            email['thread_count'] = tracker.get_thread_count(conv_id) if conv_id else 0
+            email['conversation_position'] = email.get('conversation_position', 1)
         return jsonify({'emails': pending, 'stats': stats})
     finally:
         tracker.close()
@@ -572,6 +595,19 @@ def api_pending_detail(pending_id):
         # Add cleaned body summary
         email['body_summary'] = _summarize_body(email.get('body', ''))
         email['has_html_body'] = bool(email.get('body_html'))
+
+        # Add conversation/thread data
+        conv_id = email.get('conversation_id')
+        if conv_id:
+            conv = tracker.get_conversation(conv_id)
+            if conv:
+                email['conversation'] = conv
+                email['thread_emails'] = tracker.get_conversation_emails(conv_id)
+                email['thread_count'] = conv.get('email_count', 1)
+            else:
+                email['thread_count'] = 0
+        else:
+            email['thread_count'] = 0
 
         return jsonify(email)
     finally:
@@ -993,6 +1029,28 @@ def api_contacts_delete(contact_id):
         tracker.close()
 
 
+# --- Conversations ---
+
+@app.route('/api/conversations/<int:conv_id>')
+def api_conversation(conv_id):
+    """Return full conversation with all member emails."""
+    tracker = _get_tracker()
+    try:
+        conv = tracker.get_conversation(conv_id)
+        if not conv:
+            return jsonify({'error': 'Conversation not found'}), 404
+        emails = tracker.get_conversation_emails(conv_id)
+        # Enrich with contact info
+        for email in emails:
+            contact = tracker.find_contact_by_email(email.get('sender', ''))
+            email['sender_company'] = contact['company'] if contact else ''
+            email['sender_known'] = contact is not None
+        conv['emails'] = emails
+        return jsonify(conv)
+    finally:
+        tracker.close()
+
+
 # --- Excel Export ---
 
 @app.route('/api/export/excel')
@@ -1139,6 +1197,14 @@ if __name__ == '__main__':
     tracker = _get_tracker()
     class_cfg = _get_class_cfg()
     tracker.seed_default_departments(class_cfg.get('discipline_keywords', {}))
+
+    # One-time backfill: group existing emails into conversations
+    if not tracker.get_setting('conversations_backfilled'):
+        logger.info("Running one-time conversation backfill...")
+        tracker.backfill_conversations()
+        tracker.set_setting('conversations_backfilled', '1')
+        logger.info("Conversation backfill complete.")
+
     tracker.close()
 
     start_scheduler()

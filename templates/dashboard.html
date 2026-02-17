@@ -368,6 +368,49 @@
         .resp-yes { color: var(--danger); font-weight: 600; }
         .resp-no { color: var(--text-light); }
 
+        /* Thread badges */
+        .thread-badge {
+            display: inline-block; font-size: 9px; font-weight: 700;
+            padding: 1px 6px; border-radius: 4px; margin-left: 4px; vertical-align: middle;
+        }
+        .thread-badge.new-topic { background: #dcfce7; color: #166534; }
+        .thread-badge.follow-up { background: #dbeafe; color: #1e40af; }
+        .thread-badge.thread-count { background: #f3e8ff; color: #6b21a8; }
+        .thread-badge.auto-assigned { background: #dbeafe; color: #1e40af; }
+        [data-theme="dark"] .thread-badge.new-topic { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .thread-badge.follow-up { background: #1e3a5f; color: #93c5fd; }
+        [data-theme="dark"] .thread-badge.thread-count { background: #3b0764; color: #c4b5fd; }
+        [data-theme="dark"] .thread-badge.auto-assigned { background: #1e3a5f; color: #93c5fd; }
+
+        /* Conversation timeline */
+        .conv-timeline { margin-top: 12px; padding: 0 0 0 16px; border-left: 2px solid var(--border); }
+        .conv-timeline-item {
+            position: relative; padding: 8px 0 8px 16px; font-size: 12px;
+            color: var(--text-muted);
+        }
+        .conv-timeline-item::before {
+            content: ''; position: absolute; left: -21px; top: 12px;
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--border);
+        }
+        .conv-timeline-item.current::before { background: var(--primary); }
+        .conv-timeline-item.current { color: var(--text); font-weight: 600; }
+        .conv-timeline-item .tl-date { font-weight: 600; margin-right: 6px; }
+        .conv-timeline-item .tl-sender { margin-right: 6px; }
+        .conv-timeline-item .tl-subject { font-style: italic; }
+        .conv-timeline-item .tl-status {
+            display: inline-block; font-size: 10px; font-weight: 700;
+            padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+        }
+        .tl-status.approved { background: #dcfce7; color: #166534; }
+        .tl-status.pending { background: #fef3c7; color: #92400e; }
+        .tl-status.auto { background: #dbeafe; color: #1e40af; }
+        [data-theme="dark"] .tl-status.approved { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .tl-status.pending { background: #78350f; color: #fcd34d; }
+        [data-theme="dark"] .tl-status.auto { background: #1e3a5f; color: #93c5fd; }
+        .conv-timeline-link { cursor: pointer; }
+        .conv-timeline-link:hover { color: var(--primary); }
+
         /* Attachments */
         .att-list { display: flex; flex-direction: column; gap: 2px; }
         .att-list a {
@@ -1044,6 +1087,24 @@ function renderAiBadge(method, confidence) {
     return '<span class="ai-badge ' + cls + '"><span class="ai-dot"></span>' + label + '</span>';
 }
 
+function renderThreadBadges(e) {
+    var html = '';
+    var tc = e.thread_count || 0;
+    var pos = e.conversation_position || 1;
+    if (tc > 1) {
+        html += '<span class="thread-badge thread-count">' + tc + ' in thread</span>';
+    }
+    if (pos === 1) {
+        html += '<span class="thread-badge new-topic">New</span>';
+    } else if (pos > 1) {
+        html += '<span class="thread-badge follow-up">Follow-up</span>';
+    }
+    if (e.transmittal_no && e.status === 'approved' && pos > 1) {
+        html += '<span class="thread-badge auto-assigned">Auto: ' + esc(e.transmittal_no) + '</span>';
+    }
+    return html;
+}
+
 // ---- Dark Mode (F6) ----
 function toggleDarkMode() {
     var html = document.documentElement;
@@ -1256,7 +1317,7 @@ function renderPendingTable() {
         html+='<div class="card-row">';
         if(isReview) html+='<div class="card-check"><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></div>';
         html+='<div style="flex:1;min-width:0">';
-        html+='<div class="card-subject" onclick="openDetailModal('+e.id+')">'+esc(e.subject||'(no subject)')+'</div>';
+        html+='<div class="card-subject" onclick="openDetailModal('+e.id+')">'+esc(e.subject||'(no subject)')+renderThreadBadges(e)+'</div>';
         html+='<div class="card-meta">';
         html+='<span>'+esc(e.sender_name||e.sender)+senderBadge+'</span>';
         html+='<span>'+fmtTime(isRejected && e.decided_at ? e.decided_at : e.scanned_at)+'</span>';
@@ -1303,7 +1364,7 @@ function renderPendingTable() {
         html+='<td class="col-num">'+idx+'</td>'+
             '<td style="white-space:nowrap">'+fmtTime(dateCol)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+esc(e.sender_name||e.sender)+senderBadge+senderCompany+'</td>'+
-            '<td class="col-subject"><span class="subject-link" onclick="openDetailModal('+e.id+')">'+esc(e.subject)+'</span></td>';
+            '<td class="col-subject"><span class="subject-link" onclick="openDetailModal('+e.id+')">'+esc(e.subject)+'</span>'+renderThreadBadges(e)+'</td>';
         if(isReview){
             html+='<td id="att-cell-'+e.id+'">'+(e.attachment_count||0)+'</td>'+
                 '<td><select class="inline-select" data-id="'+e.id+'" data-field="doc_type">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></td>'+
@@ -1477,6 +1538,33 @@ function openDetailModal(id){
         if(e.classifier_method){
             h+='<div class="modal-field"><div class="modal-field-label">Classified By</div><div class="modal-field-value">'+renderAiBadge(e.classifier_method, e.confidence)+'</div></div>';
         }
+        // Conversation timeline
+        if(e.thread_emails && e.thread_emails.length > 1){
+            h+='<div class="modal-field"><div class="modal-field-label">Conversation Thread ('+e.thread_emails.length+' emails)</div>';
+            if(e.conversation && e.conversation.transmittal_no){
+                h+='<div style="font-size:12px;margin-bottom:8px;color:var(--primary);font-weight:600">'+esc(e.conversation.transmittal_no)+'</div>';
+            }
+            h+='<div class="conv-timeline">';
+            for(var ti=0;ti<e.thread_emails.length;ti++){
+                var te=e.thread_emails[ti];
+                var isCurrent = te.message_id === e.message_id;
+                var tlClass = isCurrent ? 'conv-timeline-item current' : 'conv-timeline-item';
+                var clickable = (!isCurrent && te.id && te.source === 'pending') ? ' conv-timeline-link' : '';
+                h+='<div class="'+tlClass+clickable+'"'+(clickable?' onclick="closeDetailModal();setTimeout(function(){openDetailModal('+te.id+')},200)"':'')+'>';
+                h+='<span class="tl-date">'+fmtTime(te.email_date)+'</span>';
+                h+='<span class="tl-sender">'+esc(te.sender_name||te.sender)+'</span>';
+                h+=' &mdash; <span class="tl-subject">'+esc(te.subject||'(no subject)')+'</span>';
+                if(te.transmittal_no){
+                    var stCls = (te.status==='approved' && te.conversation_position > 1) ? 'auto' : 'approved';
+                    h+='<span class="tl-status '+stCls+'">'+esc(te.transmittal_no)+'</span>';
+                } else if(te.status==='pending_review'){
+                    h+='<span class="tl-status pending">Pending</span>';
+                }
+                if(isCurrent) h+=' <span style="font-size:10px;color:var(--primary)">&larr; current</span>';
+                h+='</div>';
+            }
+            h+='</div></div>';
+        }
         if(pendingStatusFilter==='pending_review'){
             h+='<div class="modal-fields-row">';
             h+='<div class="modal-field"><div class="modal-field-label">Document Type</div><select class="modal-select" id="modalDocType">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></div>';
@@ -1573,7 +1661,8 @@ function renderProcessedTable(){
         var e=items[i];
         html+='<div class="email-card">';
         html+='<div class="card-row"><div style="flex:1;min-width:0">';
-        html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+'</div>';
+        var tcLabel = e.thread_count > 1 ? ' <span class="thread-badge thread-count">' + e.thread_count + ' emails</span>' : '';
+        html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+tcLabel+'</div>';
         html+='<div class="card-subject" style="color:var(--text);cursor:default">'+esc(e.subject||'(no subject)')+'</div>';
         html+='<div class="card-meta">';
         html+='<span>'+esc(e.sender_name||e.sender)+'</span>';
@@ -1599,8 +1688,9 @@ function renderProcessedTable(){
         var sd=esc(e.sender_name||e.sender);
         if(e.sender_company) sd+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
         var rc=e.response_required?'resp-yes':'resp-no', rt=e.response_required?'Yes':'No';
+        var tcBadge = e.thread_count > 1 ? ' <span class="thread-badge thread-count">' + e.thread_count + '</span>' : '';
         html+='<tr><td class="col-num">'+idx+'</td>'+
-            '<td><strong>'+esc(e.transmittal_no)+'</strong></td>'+
+            '<td><strong>'+esc(e.transmittal_no)+'</strong>'+tcBadge+'</td>'+
             '<td style="white-space:nowrap">'+fmtTime(e.processed_at)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
