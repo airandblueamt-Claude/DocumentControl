@@ -50,6 +50,12 @@ class ImapEmailClient:
         logger.info("Found %d unread messages", len(msg_ids))
         return msg_ids
 
+    def search_all(self):
+        """Search for ALL messages in the selected folder, return message IDs."""
+        msg_ids = self._client.search('ALL')
+        logger.info("Found %d total messages", len(msg_ids))
+        return msg_ids
+
     def fetch_message(self, msg_id):
         """Fetch complete message in RFC822 format."""
         data = self._client.fetch([msg_id], ['RFC822'])

@@ -443,6 +443,46 @@ def api_scan():
     return jsonify({'message': 'Scan started'}), 202
 
 
+@app.route('/api/scan-all', methods=['POST'])
+def api_scan_all():
+    """One-time full inbox scan — fetches ALL messages (read + unread), skips already-known."""
+    if scan_state['status'] == 'scanning':
+        return jsonify({'message': 'Scan already in progress'}), 409
+
+    def _run_full_scan():
+        if not scan_lock.acquire(blocking=False):
+            return
+        try:
+            scan_state['status'] = 'scanning'
+            _ensure_logging()
+            _ensure_backfill()
+            logger.info("Dashboard: starting FULL inbox scan")
+            from email_interface.scanner import scan_all_emails
+            counts = scan_all_emails(base_dir=BASE_DIR)
+            auto_str = f", {counts['auto_assigned']} auto-assigned" if counts.get('auto_assigned') else ''
+            scan_state['status'] = 'idle'
+            scan_state['last_scan_time'] = datetime.now().isoformat()
+            scan_state['last_scan_result'] = (
+                f"FULL SCAN: {counts['total']} total, {counts['queued']} queued{auto_str}, "
+                f"{counts['already_known']} already known, "
+                f"{counts['out_of_scope']} out-of-scope, {counts['skipped']} skipped"
+            )
+            scan_state['last_scan_ok'] = counts['errors'] == 0
+            logger.info("Dashboard: full scan complete - %s", scan_state['last_scan_result'])
+        except Exception as e:
+            scan_state['status'] = 'error'
+            scan_state['last_scan_time'] = datetime.now().isoformat()
+            scan_state['last_scan_result'] = f"Full scan error: {e}"
+            scan_state['last_scan_ok'] = False
+            logger.error("Dashboard: full scan failed - %s", e, exc_info=True)
+        finally:
+            scan_lock.release()
+
+    t = threading.Thread(target=_run_full_scan, daemon=True)
+    t.start()
+    return jsonify({'message': 'Full inbox scan started — this may take a few minutes'}), 202
+
+
 @app.route('/api/emails')
 def api_emails():
     db_path = _get_db_path()

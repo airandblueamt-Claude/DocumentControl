@@ -893,6 +893,7 @@
                     </div>
                     <div class="scanner-actions">
                         <button class="btn btn-primary btn-scan" id="btnScan" onclick="triggerScan()">Scan Now</button>
+                        <button class="btn btn-ghost btn-scan" id="btnScanAll" onclick="triggerScanAll()" title="Scan ALL emails in inbox (read + unread) — use once to catch everything">Scan All Emails</button>
                     </div>
                 </div>
                 <div class="control-card classifier">
@@ -1192,8 +1193,9 @@ function updateStatus(data) {
     var sr=document.getElementById('scanResult');
     if(data.last_scan_result){sr.textContent=data.last_scan_result;sr.className='ctrl-value '+(data.last_scan_ok?'ok':'err');}
     var btn=document.getElementById('btnScan');
-    if(data.status==='scanning'){btn.disabled=true;btn.textContent='Scanning...';}
-    else{btn.disabled=false;btn.textContent='Scan Now';}
+    var btnAll=document.getElementById('btnScanAll');
+    if(data.status==='scanning'){btn.disabled=true;btn.textContent='Scanning...';if(btnAll)btnAll.disabled=true;}
+    else{btn.disabled=false;btn.textContent='Scan Now';if(btnAll){btnAll.disabled=false;btnAll.textContent='Scan All Emails';}}
     // F2: Classifier downgrade notice
     var notice = document.getElementById('classifierNotice');
     if (notice && data.classifiers_used && data.classifiers_used.length > 0) {
@@ -1227,6 +1229,16 @@ function triggerScan() {
         if(r.status===409){btn.textContent='Already running';setTimeout(function(){btn.disabled=false;btn.textContent='Scan Now';},2000);return;}
         startScanPolling();
     }).catch(function(){btn.disabled=false;btn.textContent='Scan Now';});
+}
+function triggerScanAll() {
+    if(!confirm('This will scan ALL emails in your inbox (read + unread). It may take several minutes. Continue?')) return;
+    var btn=document.getElementById('btnScanAll'); btn.disabled=true; btn.textContent='Scanning all...';
+    var btnMain=document.getElementById('btnScan'); btnMain.disabled=true;
+    fetch('/api/scan-all',{method:'POST'}).then(function(r){
+        if(r.status===409){btn.textContent='Already running';setTimeout(function(){btn.disabled=false;btn.textContent='Scan All Emails';btnMain.disabled=false;},2000);return;}
+        showToast('Full inbox scan started — this may take a few minutes','info');
+        startScanPolling();
+    }).catch(function(){btn.disabled=false;btn.textContent='Scan All Emails';btnMain.disabled=false;});
 }
 var scanPollTimer=null;
 function startScanPolling(){
