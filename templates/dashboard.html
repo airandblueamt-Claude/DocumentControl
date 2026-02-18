@@ -76,7 +76,7 @@
         [data-theme="dark"] tbody tr { border-bottom-color: #334155; }
         [data-theme="dark"] .email-cards { background: #0f172a; }
         [data-theme="dark"] .email-card:active { background: #334155; }
-        [data-theme="dark"] .step-card { background: #334155; }
+        [data-theme="dark"] .kpi-card { background: var(--card); }
         [data-theme="dark"] .page-btn { background: var(--card); color: var(--text-muted); border-color: var(--border); }
         [data-theme="dark"] .page-btn:hover { background: #334155; color: var(--text); }
         [data-theme="dark"] .error-msg { background: #451a1a; }
@@ -655,47 +655,127 @@
             .btn-sm { padding: 4px 8px; font-size: 11px; }
         }
 
-        /* ---- Home Page ---- */
-        .home-hero {
-            background: var(--card); border-radius: var(--radius);
-            box-shadow: var(--shadow); padding: 24px 20px;
-            margin-bottom: 16px; text-align: center;
-        }
-        .home-hero h2 { font-size: 20px; font-weight: 800; margin-bottom: 8px; color: var(--text); }
-        .home-hero p { font-size: 14px; color: var(--text-muted); max-width: 600px; margin: 0 auto; line-height: 1.6; }
-        .home-stats {
+        /* ---- Activity Summary (Home Tab) ---- */
+        .kpi-row {
             display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
             margin-bottom: 16px;
         }
-        .home-stat-card {
+        .kpi-card {
             background: var(--card); border-radius: var(--radius);
-            box-shadow: var(--shadow); padding: 16px; text-align: center;
+            box-shadow: var(--shadow); padding: 14px 12px; text-align: center;
+            border-left: 4px solid var(--primary); transition: transform 0.15s;
         }
-        .home-stat-value { font-size: 28px; font-weight: 800; color: var(--primary); }
-        .home-stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-top: 2px; }
-        .home-steps { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; }
-        .home-steps h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
-        .steps-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-        .step-card {
-            display: flex; align-items: flex-start; gap: 12px;
-            padding: 12px; border-radius: 8px; background: #f8fafc;
+        .kpi-card:hover { transform: translateY(-1px); }
+        .kpi-card.border-danger { border-left-color: var(--danger); }
+        .kpi-card.border-warn { border-left-color: var(--warn); }
+        .kpi-card.border-success { border-left-color: var(--success); }
+        .kpi-card.border-purple { border-left-color: var(--purple); }
+        .kpi-card.border-info { border-left-color: var(--primary); }
+        .kpi-value { font-size: 26px; font-weight: 800; color: var(--text); }
+        .kpi-value.text-danger { color: var(--danger); }
+        .kpi-value.text-warn { color: var(--warn); }
+        .kpi-value.text-success { color: var(--success); }
+        .kpi-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-top: 2px; }
+
+        .activity-grid {
+            display: grid; grid-template-columns: 1fr; gap: 14px;
+            margin-bottom: 16px;
         }
-        .step-num {
-            width: 32px; height: 32px; border-radius: 50%;
-            background: var(--primary); color: #fff;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 14px; font-weight: 800; flex-shrink: 0;
+        .summary-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 16px; min-height: 100px;
         }
-        .step-title { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
-        .step-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+        .summary-card-title {
+            font-size: 13px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .5px; color: var(--text-muted); margin-bottom: 12px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .summary-card-title .sc-icon { font-size: 15px; }
+
+        .attn-list { list-style: none; padding: 0; margin: 0; }
+        .attn-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 7px 0; border-bottom: 1px solid var(--border);
+            font-size: 12px; cursor: pointer;
+        }
+        .attn-item:last-child { border-bottom: none; }
+        .attn-item:hover { color: var(--primary); }
+        .attn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .attn-dot.dot-red { background: var(--danger); }
+        .attn-dot.dot-amber { background: var(--warn); }
+        .attn-dot.dot-purple { background: var(--purple); }
+        .attn-dot.dot-gray { background: var(--text-light); }
+        .attn-label { font-size: 10px; font-weight: 600; color: var(--text-light); margin-left: auto; white-space: nowrap; }
+        .attn-empty { font-size: 12px; color: var(--text-light); padding: 8px 0; }
+
+        .period-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+        .period-tab {
+            padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 600;
+            border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+            cursor: pointer; transition: all .15s;
+        }
+        .period-tab:hover { border-color: var(--primary); color: var(--primary); }
+        .period-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .period-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        .period-stat { text-align: center; padding: 8px; border-radius: 8px; background: var(--bg); }
+        .period-stat-val { font-size: 22px; font-weight: 800; color: var(--text); }
+        .period-stat-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
+
+        .bar-chart { padding: 0; }
+        .bar-row {
+            display: flex; align-items: center; gap: 8px;
+            padding: 5px 0; font-size: 12px;
+        }
+        .bar-label { width: 100px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--text); }
+        .bar-track { flex: 1; height: 18px; background: var(--bg); border-radius: 4px; overflow: hidden; position: relative; }
+        .bar-fill { height: 100%; border-radius: 4px; transition: width .3s; min-width: 2px; }
+        .bar-fill.fill-primary { background: var(--primary); }
+        .bar-fill.fill-success { background: var(--success); }
+        .bar-fill.fill-warn { background: var(--warn); }
+        .bar-fill.fill-purple { background: var(--purple); }
+        .bar-count { width: 36px; text-align: right; font-weight: 700; color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
+
+        .activity-feed { max-height: 320px; overflow-y: auto; }
+        .feed-item {
+            display: flex; align-items: flex-start; gap: 8px;
+            padding: 7px 0; border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .feed-item:last-child { border-bottom: none; }
+        .feed-icon { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; color: #fff; }
+        .feed-icon.fi-approved { background: var(--success); }
+        .feed-icon.fi-rejected { background: var(--danger); }
+        .feed-icon.fi-scanned { background: var(--primary); }
+        .feed-text { flex: 1; line-height: 1.4; }
+        .feed-subject { font-weight: 600; color: var(--text); }
+        .feed-meta { font-size: 10px; color: var(--text-light); }
+
+        .clf-perf-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .clf-perf-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 480px; }
+        .clf-perf-table th {
+            text-align: left; padding: 8px 6px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted);
+            border-bottom: 2px solid var(--border);
+        }
+        .clf-perf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); }
+        .conf-bar { width: 60px; height: 6px; background: var(--bg); border-radius: 3px; display: inline-block; vertical-align: middle; margin-left: 6px; overflow: hidden; }
+        .conf-bar-fill { height: 100%; border-radius: 3px; background: var(--success); }
+
+        .home-cta { text-align: center; margin-top: 16px; }
 
         @media (min-width: 768px) {
-            .home-hero { padding: 36px 28px; }
-            .home-hero h2 { font-size: 26px; }
-            .home-stats { grid-template-columns: repeat(4, 1fr); }
-            .home-stat-value { font-size: 34px; }
-            .steps-grid { grid-template-columns: repeat(2, 1fr); }
+            .kpi-row { grid-template-columns: repeat(4, 1fr); }
+            .activity-grid { grid-template-columns: repeat(2, 1fr); }
         }
+        @media (min-width: 1024px) {
+            .kpi-row { grid-template-columns: repeat(7, 1fr); }
+            .activity-grid { grid-template-columns: repeat(2, 1fr); }
+            .kpi-value { font-size: 30px; }
+        }
+        [data-theme="dark"] .period-stat { background: #0f172a; }
+        [data-theme="dark"] .bar-track { background: #0f172a; }
+        [data-theme="dark"] .period-tab { background: transparent; border-color: var(--border); color: var(--text-muted); }
+        [data-theme="dark"] .period-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
         /* ---- Classifier Select ---- */
         .clf-select {
@@ -947,53 +1027,107 @@
     <!-- HOME -->
     <div class="tab-panel active" id="tab-home">
         <div class="container">
-            <div class="home-hero">
-                <h2>Document Control Email Interface</h2>
-                <p>Automatically scans your mailbox, classifies incoming correspondence using AI, and queues emails for your review. Approve to assign transmittal numbers, save attachments, and log everything to Excel.</p>
-                <button class="btn btn-primary" onclick="switchTab('review')" style="margin-top:12px">Go to Review Queue</button>
+            <!-- KPI Row -->
+            <div class="kpi-row" id="kpiRow">
+                <div class="kpi-card border-danger" onclick="switchTab('review')">
+                    <div class="kpi-value" id="kpiPending">--</div>
+                    <div class="kpi-label">Pending</div>
+                </div>
+                <div class="kpi-card border-danger">
+                    <div class="kpi-value text-danger" id="kpiHighPri">--</div>
+                    <div class="kpi-label">High Priority</div>
+                </div>
+                <div class="kpi-card border-purple">
+                    <div class="kpi-value" id="kpiRespReq">--</div>
+                    <div class="kpi-label">Resp. Req'd</div>
+                </div>
+                <div class="kpi-card border-success">
+                    <div class="kpi-value text-success" id="kpiApproved">--</div>
+                    <div class="kpi-label">Approved</div>
+                </div>
+                <div class="kpi-card border-info">
+                    <div class="kpi-value" id="kpiProcessed">--</div>
+                    <div class="kpi-label">Processed</div>
+                </div>
+                <div class="kpi-card border-info">
+                    <div class="kpi-value" id="kpiConversations">--</div>
+                    <div class="kpi-label">Conversations</div>
+                </div>
+                <div class="kpi-card border-warn">
+                    <div class="kpi-value text-warn" id="kpiRejected">--</div>
+                    <div class="kpi-label">Rejected</div>
+                </div>
             </div>
-            <div class="home-stats" id="homeStats">
-                <div class="home-stat-card">
-                    <div class="home-stat-value" id="homePending">--</div>
-                    <div class="home-stat-label">Pending Review</div>
+
+            <!-- Main grid -->
+            <div class="activity-grid">
+                <!-- Needs Attention -->
+                <div class="summary-card">
+                    <div class="summary-card-title"><span class="sc-icon">!</span> Needs Attention</div>
+                    <ul class="attn-list" id="attnList">
+                        <li class="attn-empty">Loading...</li>
+                    </ul>
                 </div>
-                <div class="home-stat-card">
-                    <div class="home-stat-value" id="homeProcessed">--</div>
-                    <div class="home-stat-label">Processed</div>
+
+                <!-- Activity by Period -->
+                <div class="summary-card">
+                    <div class="summary-card-title"><span class="sc-icon">~</span> Activity</div>
+                    <div class="period-tabs" id="periodTabs">
+                        <button class="period-tab active" onclick="switchPeriod('today')">Today</button>
+                        <button class="period-tab" onclick="switchPeriod('this_week')">This Week</button>
+                        <button class="period-tab" onclick="switchPeriod('this_month')">This Month</button>
+                    </div>
+                    <div class="period-stats" id="periodStats">
+                        <div class="period-stat"><div class="period-stat-val" id="pScanned">--</div><div class="period-stat-lbl">Scanned</div></div>
+                        <div class="period-stat"><div class="period-stat-val" id="pApproved">--</div><div class="period-stat-lbl">Approved</div></div>
+                        <div class="period-stat"><div class="period-stat-val" id="pRejected">--</div><div class="period-stat-lbl">Rejected</div></div>
+                        <div class="period-stat"><div class="period-stat-val" id="pProcessed">--</div><div class="period-stat-lbl">Processed</div></div>
+                    </div>
                 </div>
-                <div class="home-stat-card">
-                    <div class="home-stat-value" id="homeDepts">--</div>
-                    <div class="home-stat-label">Departments</div>
+
+                <!-- By Department -->
+                <div class="summary-card">
+                    <div class="summary-card-title">By Department</div>
+                    <div class="bar-chart" id="deptChart">
+                        <div style="font-size:12px;color:var(--text-light)">Loading...</div>
+                    </div>
                 </div>
-                <div class="home-stat-card">
-                    <div class="home-stat-value" id="homeContacts">--</div>
-                    <div class="home-stat-label">Contacts</div>
+
+                <!-- By Doc Type -->
+                <div class="summary-card">
+                    <div class="summary-card-title">By Document Type</div>
+                    <div class="bar-chart" id="typeChart">
+                        <div style="font-size:12px;color:var(--text-light)">Loading...</div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity Feed -->
+                <div class="summary-card">
+                    <div class="summary-card-title">Recent Activity</div>
+                    <div class="activity-feed" id="activityFeed">
+                        <div style="font-size:12px;color:var(--text-light)">Loading...</div>
+                    </div>
+                </div>
+
+                <!-- Top Senders -->
+                <div class="summary-card">
+                    <div class="summary-card-title">Top Senders</div>
+                    <div class="bar-chart" id="senderChart">
+                        <div style="font-size:12px;color:var(--text-light)">Loading...</div>
+                    </div>
                 </div>
             </div>
-            <div class="home-steps">
-                <h3>How It Works</h3>
-                <div class="steps-grid">
-                    <div class="step-card">
-                        <div class="step-num">1</div>
-                        <div class="step-title">Scan</div>
-                        <div class="step-desc">Connects to your mailbox via IMAP and fetches unread emails on a schedule or on demand.</div>
-                    </div>
-                    <div class="step-card">
-                        <div class="step-num">2</div>
-                        <div class="step-title">Classify</div>
-                        <div class="step-desc">AI or keyword-based engine categorizes each email by document type, discipline, and department.</div>
-                    </div>
-                    <div class="step-card">
-                        <div class="step-num">3</div>
-                        <div class="step-title">Review</div>
-                        <div class="step-desc">You review, edit classifications, then approve or reject from the dashboard.</div>
-                    </div>
-                    <div class="step-card">
-                        <div class="step-num">4</div>
-                        <div class="step-title">Track</div>
-                        <div class="step-desc">Approved emails get a transmittal number, attachments are saved, and everything is logged to Excel.</div>
-                    </div>
+
+            <!-- Classifier Performance (full width) -->
+            <div class="summary-card" style="margin-bottom:16px">
+                <div class="summary-card-title">Classifier Performance</div>
+                <div class="clf-perf-wrap" id="clfPerfContainer">
+                    <div style="font-size:12px;color:var(--text-light)">Loading...</div>
                 </div>
+            </div>
+
+            <div class="home-cta">
+                <button class="btn btn-primary" onclick="switchTab('review')">Go to Review Queue</button>
             </div>
         </div>
     </div>
@@ -1311,7 +1445,7 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active');});
     document.querySelector('[data-tab="'+tab+'"]').classList.add('active');
     document.getElementById('tab-'+tab).classList.add('active');
-    if(tab==='home') fetchHomeStats();
+    if(tab==='home') fetchActivitySummary();
     if(tab==='review') fetchPending();
     if(tab==='processed'){fetchEmails();fetchStatus();}
     if(tab==='departments') fetchDepartments();
@@ -2116,22 +2250,187 @@ function saveAiInstructions(){
     }).catch(function(){showToast('Failed to save instructions','error');});
 }
 
-// ---- Home Stats ----
-function fetchHomeStats(){
-    fetch('/api/home-stats').then(function(r){return r.json();}).then(function(d){
-        document.getElementById('homePending').textContent=d.pending_review;
-        document.getElementById('homeProcessed').textContent=d.total_processed;
-        document.getElementById('homeDepts').textContent=d.departments;
-        document.getElementById('homeContacts').textContent=d.contacts;
+// ---- Activity Summary (Home Tab) ----
+var activityData = null;
+var currentPeriod = 'today';
+
+function fetchActivitySummary(){
+    fetch('/api/activity-summary').then(function(r){return r.json();}).then(function(d){
+        activityData = d;
+        renderKPIs(d.counts, d.attention);
+        renderAttentionCard(d.attention);
+        renderPeriodStats(d.time_series[currentPeriod]);
+        renderBarChart('deptChart', d.breakdowns.by_department, 'fill-primary');
+        renderBarChart('typeChart', d.breakdowns.by_doc_type, 'fill-purple');
+        renderActivityFeed(d.recent_activity);
+        renderSenderChart(d.top_senders);
+        renderClassifierPerf(d.classifier_performance);
     }).catch(function(){});
+}
+
+function renderKPIs(counts, attn){
+    document.getElementById('kpiPending').textContent = counts.pending_review;
+    document.getElementById('kpiHighPri').textContent = attn.high_priority_count || 0;
+    document.getElementById('kpiRespReq').textContent = counts.response_required_pending;
+    document.getElementById('kpiApproved').textContent = counts.approved;
+    document.getElementById('kpiProcessed').textContent = counts.total_processed;
+    document.getElementById('kpiConversations').textContent = counts.active_conversations;
+    document.getElementById('kpiRejected').textContent = counts.rejected;
+    // Color pending red if > 0, green if 0
+    var pendEl = document.getElementById('kpiPending');
+    pendEl.className = 'kpi-value' + (counts.pending_review > 0 ? ' text-danger' : ' text-success');
+}
+
+function renderAttentionCard(attn){
+    var list = document.getElementById('attnList');
+    var items = [];
+    var seen = {};
+    function addItems(arr, dotClass, label){
+        for(var i=0;i<arr.length;i++){
+            if(seen[arr[i].id]) continue;
+            seen[arr[i].id] = true;
+            items.push({item: arr[i], dotClass: dotClass, label: label});
+        }
+    }
+    addItems(attn.high_priority, 'dot-red', 'High Priority' + (attn.high_priority_count > 10 ? ' (' + attn.high_priority_count + ')' : ''));
+    addItems(attn.stale, 'dot-amber', '48h+' + (attn.stale_count > 10 ? ' (' + attn.stale_count + ')' : ''));
+    addItems(attn.response_required, 'dot-purple', 'Resp. Req.' + (attn.response_required_count > 10 ? ' (' + attn.response_required_count + ')' : ''));
+    addItems(attn.low_confidence, 'dot-gray', 'Low Conf.' + (attn.low_confidence_count > 10 ? ' (' + attn.low_confidence_count + ')' : ''));
+
+    if(items.length === 0){
+        list.innerHTML = '<li class="attn-empty">Nothing needs attention right now.</li>';
+        return;
+    }
+    var html = '';
+    for(var i=0; i<items.length; i++){
+        var it = items[i];
+        var subj = (it.item.subject || '(no subject)');
+        if(subj.length > 55) subj = subj.substring(0, 55) + '...';
+        html += '<li class="attn-item" onclick="switchTab(\'review\')" title="' + (it.item.subject||'').replace(/"/g,'&quot;') + '">' +
+            '<span class="attn-dot ' + it.dotClass + '"></span>' +
+            '<span>' + subj.replace(/</g,'&lt;') + '</span>' +
+            '<span class="attn-label">' + it.label + '</span></li>';
+    }
+    list.innerHTML = html;
+}
+
+function switchPeriod(period){
+    currentPeriod = period;
+    document.querySelectorAll('.period-tab').forEach(function(b){ b.classList.remove('active'); });
+    var labels = {today:'Today', this_week:'This Week', this_month:'This Month'};
+    document.querySelectorAll('.period-tab').forEach(function(b){
+        if(b.textContent.trim() === labels[period]) b.classList.add('active');
+    });
+    if(activityData) renderPeriodStats(activityData.time_series[period]);
+}
+
+function renderPeriodStats(data){
+    document.getElementById('pScanned').textContent = data.scanned;
+    document.getElementById('pApproved').textContent = data.approved;
+    document.getElementById('pRejected').textContent = data.rejected;
+    document.getElementById('pProcessed').textContent = data.processed;
+}
+
+function renderBarChart(containerId, data, colorClass){
+    var el = document.getElementById(containerId);
+    if(!data || data.length === 0){
+        el.innerHTML = '<div style="font-size:12px;color:var(--text-light);padding:8px 0">No data yet</div>';
+        return;
+    }
+    var maxVal = 0;
+    for(var i=0;i<data.length;i++){
+        var total = (data[i].pending||0) + (data[i].processed||0) + (data[i].count||0);
+        if(total > maxVal) maxVal = total;
+    }
+    if(maxVal === 0) maxVal = 1;
+    var html = '';
+    for(var i=0;i<data.length;i++){
+        var d = data[i];
+        var name = d.name || d.sender || '(unknown)';
+        var total = (d.pending||0) + (d.processed||0) + (d.count||0);
+        var pct = Math.round((total / maxVal) * 100);
+        if(name.length > 18) name = name.substring(0, 18) + '...';
+        html += '<div class="bar-row"><span class="bar-label" title="' + (d.name||d.sender||'').replace(/"/g,'&quot;') + '">' + name.replace(/</g,'&lt;') + '</span>' +
+            '<div class="bar-track"><div class="bar-fill ' + colorClass + '" style="width:' + pct + '%"></div></div>' +
+            '<span class="bar-count">' + total + '</span></div>';
+    }
+    el.innerHTML = html;
+}
+
+function renderSenderChart(senders){
+    var el = document.getElementById('senderChart');
+    if(!senders || senders.length === 0){
+        el.innerHTML = '<div style="font-size:12px;color:var(--text-light);padding:8px 0">No data yet</div>';
+        return;
+    }
+    var maxVal = senders[0].count || 1;
+    var html = '';
+    for(var i=0;i<senders.length;i++){
+        var s = senders[i];
+        var name = s.sender || '(unknown)';
+        var pct = Math.round((s.count / maxVal) * 100);
+        // Show just the local part or short form
+        var shortName = name;
+        if(shortName.length > 22) shortName = shortName.substring(0, 22) + '...';
+        html += '<div class="bar-row"><span class="bar-label" title="' + name.replace(/"/g,'&quot;') + '">' + shortName.replace(/</g,'&lt;') + '</span>' +
+            '<div class="bar-track"><div class="bar-fill fill-warn" style="width:' + pct + '%"></div></div>' +
+            '<span class="bar-count">' + s.count + '</span></div>';
+    }
+    el.innerHTML = html;
+}
+
+function renderActivityFeed(items){
+    var el = document.getElementById('activityFeed');
+    if(!items || items.length === 0){
+        el.innerHTML = '<div style="font-size:12px;color:var(--text-light);padding:8px 0">No recent activity</div>';
+        return;
+    }
+    var icons = {approved: {cls:'fi-approved', sym:'&#10003;'}, rejected: {cls:'fi-rejected', sym:'&#10005;'}, scanned: {cls:'fi-scanned', sym:'&#9679;'}};
+    var labels = {approved: 'Approved', rejected: 'Rejected', scanned: 'New'};
+    var html = '';
+    for(var i=0;i<items.length;i++){
+        var it = items[i];
+        var ic = icons[it.action] || icons.scanned;
+        var subj = (it.subject || '(no subject)');
+        if(subj.length > 50) subj = subj.substring(0, 50) + '...';
+        var sender = it.sender_name || '';
+        html += '<div class="feed-item">' +
+            '<div class="feed-icon ' + ic.cls + '">' + ic.sym + '</div>' +
+            '<div class="feed-text"><span class="feed-subject">' + subj.replace(/</g,'&lt;') + '</span>' +
+            '<div class="feed-meta">' + (labels[it.action]||it.action) + (sender ? ' &middot; ' + sender.replace(/</g,'&lt;') : '') +
+            ' &middot; ' + fmtTime(it.time) + '</div></div></div>';
+    }
+    el.innerHTML = html;
+}
+
+function renderClassifierPerf(data){
+    var el = document.getElementById('clfPerfContainer');
+    if(!data || data.length === 0){
+        el.innerHTML = '<div style="font-size:12px;color:var(--text-light);padding:8px 0">No classifier data yet</div>';
+        return;
+    }
+    var html = '<table class="clf-perf-table"><thead><tr><th>Method</th><th>Emails</th><th>Avg Confidence</th><th>Approved</th><th>Rejected</th><th>Out of Scope</th></tr></thead><tbody>';
+    for(var i=0;i<data.length;i++){
+        var d = data[i];
+        var confPct = Math.round(d.avg_confidence * 100);
+        html += '<tr><td><strong>' + (d.method||'unknown').replace(/</g,'&lt;') + '</strong></td>' +
+            '<td>' + d.total + '</td>' +
+            '<td>' + confPct + '%<div class="conf-bar"><div class="conf-bar-fill" style="width:' + confPct + '%"></div></div></td>' +
+            '<td>' + d.approved + '</td><td>' + d.rejected + '</td><td>' + d.out_of_scope + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
 }
 
 // ---- Keyboard ----
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&currentModalId)closeDetailModal();});
 
 // ---- Init ----
-fetchClassificationOptions(); fetchClassifierInfo(); fetchStatus(); fetchPending(); fetchHomeStats();
-setInterval(function(){if(document.getElementById('tab-review').classList.contains('active')){fetchPending();fetchStatus();}},30000);
+fetchClassificationOptions(); fetchClassifierInfo(); fetchStatus(); fetchPending(); fetchActivitySummary();
+setInterval(function(){
+    if(document.getElementById('tab-review').classList.contains('active')){fetchPending();fetchStatus();}
+    if(document.getElementById('tab-home').classList.contains('active')){fetchActivitySummary();}
+},30000);
 </script>
 </body>
 </html>

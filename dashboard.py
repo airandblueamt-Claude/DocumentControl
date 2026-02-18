@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from openpyxl import Workbook
@@ -458,6 +458,259 @@ def api_set_ai_instructions():
         return jsonify({'message': 'AI instructions saved', 'instructions': instructions})
     finally:
         tracker.close()
+
+
+# --- Activity Summary helpers ---
+
+def _query_counts(conn):
+    """Status counts from pending_emails."""
+    counts = {'pending_review': 0, 'approved': 0, 'rejected': 0,
+              'out_of_scope': 0, 'total_processed': 0,
+              'active_conversations': 0, 'response_required_pending': 0}
+    try:
+        for row in conn.execute("SELECT status, COUNT(*) FROM pending_emails GROUP BY status"):
+            counts[row[0]] = row[1]
+        counts['total_processed'] = conn.execute(
+            "SELECT COUNT(*) FROM processed_messages").fetchone()[0]
+        counts['active_conversations'] = conn.execute(
+            """SELECT COUNT(DISTINCT conversation_id) FROM pending_emails
+               WHERE conversation_id IS NOT NULL AND status = 'pending_review'""").fetchone()[0]
+        counts['response_required_pending'] = conn.execute(
+            "SELECT COUNT(*) FROM pending_emails WHERE status = 'pending_review' AND response_required = 1"
+        ).fetchone()[0]
+    except sqlite3.OperationalError:
+        pass
+    return counts
+
+
+def _query_time_series(conn, today, week_start, month_start):
+    """Counts for today / this week / this month."""
+    periods = {}
+    for label, start in [('today', today), ('this_week', week_start), ('this_month', month_start)]:
+        p = {'scanned': 0, 'approved': 0, 'rejected': 0, 'processed': 0}
+        try:
+            p['scanned'] = conn.execute(
+                "SELECT COUNT(*) FROM pending_emails WHERE scanned_at >= ?", (start,)).fetchone()[0]
+            p['approved'] = conn.execute(
+                "SELECT COUNT(*) FROM pending_emails WHERE status = 'approved' AND decided_at >= ?",
+                (start,)).fetchone()[0]
+            p['rejected'] = conn.execute(
+                "SELECT COUNT(*) FROM pending_emails WHERE status = 'rejected' AND decided_at >= ?",
+                (start,)).fetchone()[0]
+            p['processed'] = conn.execute(
+                "SELECT COUNT(*) FROM processed_messages WHERE processed_at >= ?",
+                (start,)).fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
+        periods[label] = p
+    return periods
+
+
+def _query_attention_needed(conn):
+    """Lists of emails needing attention (max 10 each) plus total counts."""
+    attn = {'high_priority': [], 'stale': [], 'response_required': [], 'low_confidence': [],
+            'high_priority_count': 0, 'stale_count': 0, 'response_required_count': 0, 'low_confidence_count': 0}
+    fields = "id, subject, sender, sender_name, scanned_at, department, ai_priority, confidence"
+    try:
+        attn['high_priority_count'] = conn.execute(
+            "SELECT COUNT(*) FROM pending_emails WHERE ai_priority = 'high' AND status = 'pending_review'"
+        ).fetchone()[0]
+        for row in conn.execute(
+            f"SELECT {fields} FROM pending_emails WHERE ai_priority = 'high' AND status = 'pending_review' ORDER BY scanned_at ASC LIMIT 10"
+        ):
+            attn['high_priority'].append(dict(row))
+
+        attn['stale_count'] = conn.execute(
+            "SELECT COUNT(*) FROM pending_emails WHERE status = 'pending_review' AND scanned_at < datetime('now', '-2 days')"
+        ).fetchone()[0]
+        for row in conn.execute(
+            f"SELECT {fields} FROM pending_emails WHERE status = 'pending_review' AND scanned_at < datetime('now', '-2 days') ORDER BY scanned_at ASC LIMIT 10"
+        ):
+            attn['stale'].append(dict(row))
+
+        attn['response_required_count'] = conn.execute(
+            "SELECT COUNT(*) FROM pending_emails WHERE status = 'pending_review' AND response_required = 1"
+        ).fetchone()[0]
+        for row in conn.execute(
+            f"SELECT {fields} FROM pending_emails WHERE status = 'pending_review' AND response_required = 1 ORDER BY scanned_at ASC LIMIT 10"
+        ):
+            attn['response_required'].append(dict(row))
+
+        attn['low_confidence_count'] = conn.execute(
+            "SELECT COUNT(*) FROM pending_emails WHERE status = 'pending_review' AND confidence IS NOT NULL AND confidence < 0.5"
+        ).fetchone()[0]
+        for row in conn.execute(
+            f"SELECT {fields} FROM pending_emails WHERE status = 'pending_review' AND confidence IS NOT NULL AND confidence < 0.5 ORDER BY confidence ASC LIMIT 10"
+        ):
+            attn['low_confidence'].append(dict(row))
+    except sqlite3.OperationalError:
+        pass
+    return attn
+
+
+def _query_breakdowns(conn):
+    """Department and doc_type breakdowns."""
+    by_dept = []
+    by_type = []
+    try:
+        for row in conn.execute(
+            """SELECT COALESCE(department, 'Unassigned') as dept, status, COUNT(*) as cnt
+               FROM pending_emails WHERE status IN ('pending_review', 'approved')
+               GROUP BY dept, status ORDER BY cnt DESC"""
+        ):
+            by_dept.append(dict(row))
+        for row in conn.execute(
+            """SELECT COALESCE(doc_type, 'Unknown') as dtype, status, COUNT(*) as cnt
+               FROM pending_emails WHERE status IN ('pending_review', 'approved')
+               GROUP BY dtype, status ORDER BY cnt DESC"""
+        ):
+            by_type.append(dict(row))
+    except sqlite3.OperationalError:
+        pass
+    # Aggregate into sorted list by total descending
+    def _agg(rows, key):
+        result = {}
+        for r in rows:
+            name = r[key]
+            if name not in result:
+                result[name] = {'pending': 0, 'processed': 0}
+            if r['status'] == 'pending_review':
+                result[name]['pending'] += r['cnt']
+            else:
+                result[name]['processed'] += r['cnt']
+        items = [{'name': k, **v} for k, v in result.items()]
+        items.sort(key=lambda x: x['pending'] + x['processed'], reverse=True)
+        return items
+    return {'by_department': _agg(by_dept, 'dept'), 'by_doc_type': _agg(by_type, 'dtype')}
+
+
+def _query_recent_activity(conn):
+    """Last 15 actions across approvals, rejections, and new scans."""
+    items = []
+    try:
+        for row in conn.execute(
+            """SELECT id, subject, sender_name, decided_at as time, 'approved' as action
+               FROM pending_emails WHERE status = 'approved' AND decided_at IS NOT NULL
+               ORDER BY decided_at DESC LIMIT 15"""
+        ):
+            items.append(dict(row))
+        for row in conn.execute(
+            """SELECT id, subject, sender_name, decided_at as time, 'rejected' as action
+               FROM pending_emails WHERE status = 'rejected' AND decided_at IS NOT NULL
+               ORDER BY decided_at DESC LIMIT 15"""
+        ):
+            items.append(dict(row))
+        for row in conn.execute(
+            """SELECT id, subject, sender_name, scanned_at as time, 'scanned' as action
+               FROM pending_emails WHERE status = 'pending_review'
+               ORDER BY scanned_at DESC LIMIT 15"""
+        ):
+            items.append(dict(row))
+    except sqlite3.OperationalError:
+        pass
+    items.sort(key=lambda x: x.get('time') or '', reverse=True)
+    return items[:15]
+
+
+def _query_top_senders(conn):
+    """Top 10 senders by total volume."""
+    senders = {}
+    try:
+        for row in conn.execute(
+            """SELECT sender, COUNT(*) as cnt FROM pending_emails
+               WHERE sender IS NOT NULL AND sender != ''
+               GROUP BY sender ORDER BY cnt DESC LIMIT 10"""
+        ):
+            senders[row['sender']] = row['cnt']
+        for row in conn.execute(
+            """SELECT sender, COUNT(*) as cnt FROM processed_messages
+               WHERE sender IS NOT NULL AND sender != ''
+               GROUP BY sender ORDER BY cnt DESC LIMIT 10"""
+        ):
+            s = row['sender']
+            senders[s] = senders.get(s, 0) + row['cnt']
+    except sqlite3.OperationalError:
+        pass
+    ranked = sorted(senders.items(), key=lambda x: x[1], reverse=True)[:10]
+    return [{'sender': s, 'count': c} for s, c in ranked]
+
+
+def _query_classifier_performance(conn):
+    """Classifier method breakdown with accuracy stats."""
+    perfs = []
+    try:
+        for row in conn.execute(
+            """SELECT classifier_method,
+                      COUNT(*) as total,
+                      AVG(confidence) as avg_conf,
+                      SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                      SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                      SUM(CASE WHEN status = 'out_of_scope' THEN 1 ELSE 0 END) as out_of_scope
+               FROM pending_emails
+               WHERE classifier_method IS NOT NULL AND classifier_method != ''
+               GROUP BY classifier_method ORDER BY total DESC"""
+        ):
+            perfs.append({
+                'method': row['classifier_method'],
+                'total': row['total'],
+                'avg_confidence': round(row['avg_conf'], 2) if row['avg_conf'] else 0,
+                'approved': row['approved'],
+                'rejected': row['rejected'],
+                'out_of_scope': row['out_of_scope'],
+            })
+    except sqlite3.OperationalError:
+        pass
+    return perfs
+
+
+def _empty_activity_summary():
+    """Fallback with zeros when no DB exists."""
+    return {
+        'counts': {'pending_review': 0, 'approved': 0, 'rejected': 0,
+                    'out_of_scope': 0, 'total_processed': 0,
+                    'active_conversations': 0, 'response_required_pending': 0},
+        'time_series': {
+            'today': {'scanned': 0, 'approved': 0, 'rejected': 0, 'processed': 0},
+            'this_week': {'scanned': 0, 'approved': 0, 'rejected': 0, 'processed': 0},
+            'this_month': {'scanned': 0, 'approved': 0, 'rejected': 0, 'processed': 0},
+        },
+        'attention': {'high_priority': [], 'stale': [], 'response_required': [], 'low_confidence': [],
+                      'high_priority_count': 0, 'stale_count': 0, 'response_required_count': 0, 'low_confidence_count': 0},
+        'breakdowns': {'by_department': [], 'by_doc_type': []},
+        'recent_activity': [],
+        'top_senders': [],
+        'classifier_performance': [],
+    }
+
+
+@app.route('/api/activity-summary')
+def api_activity_summary():
+    """Comprehensive activity summary for the Home tab dashboard."""
+    db_path = _get_db_path()
+    if not os.path.exists(db_path):
+        return jsonify(_empty_activity_summary())
+
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        now = datetime.now()
+        today = now.strftime('%Y-%m-%d')
+        week_start = (now - timedelta(days=now.weekday())).strftime('%Y-%m-%d')
+        month_start = now.strftime('%Y-%m-01')
+
+        result = {
+            'counts': _query_counts(conn),
+            'time_series': _query_time_series(conn, today, week_start, month_start),
+            'attention': _query_attention_needed(conn),
+            'breakdowns': _query_breakdowns(conn),
+            'recent_activity': _query_recent_activity(conn),
+            'top_senders': _query_top_senders(conn),
+            'classifier_performance': _query_classifier_performance(conn),
+        }
+        conn.close()
+        return jsonify(result)
+    except Exception:
+        return jsonify(_empty_activity_summary())
 
 
 @app.route('/api/home-stats')
