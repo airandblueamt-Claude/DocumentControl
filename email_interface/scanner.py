@@ -68,13 +68,14 @@ def _auto_assign(tracker, msg_data, classification, existing_transmittal):
     return pending_id
 
 
-def _should_auto_approve(tracker, result, contacts_list):
+def _should_auto_approve(tracker, result, contacts_list, sender=''):
     """Decide whether to auto-approve an email based on confidence and sender trust.
 
     Args:
         tracker: ProcessingTracker instance
         result: ClassificationResult from classifier
         contacts_list: List of active contact dicts
+        sender: Sender email address
 
     Returns:
         True if the email should be auto-approved.
@@ -86,7 +87,6 @@ def _should_auto_approve(tracker, result, contacts_list):
     confidence = result.confidence or 0
 
     # Check if sender is a known contact
-    sender = getattr(result, '_sender', '') or ''
     contact_emails = {c['email'].lower() for c in contacts_list}
     is_known = sender.lower().strip() in contact_emails
 
@@ -263,8 +263,7 @@ def scan_and_queue(base_dir=None, progress_callback=None):
                 classification['classifier_method'] = classifier_name
 
                 # Check for auto-approve
-                result._sender = msg_data.get('sender', '')
-                if _should_auto_approve(tracker, result, contacts):
+                if _should_auto_approve(tracker, result, contacts, msg_data.get('sender', '')):
                     classification['classifier_method'] = f"Auto ({classifier_name})"
                     pending_id = tracker.store_pending_email(msg_data, classification)
                     _store_attachments(tracker, pending_id, msg_data)
@@ -505,8 +504,7 @@ def scan_all_emails(base_dir=None, progress_callback=None):
                     classification['classifier_method'] = classifier_name
 
                     # Check for auto-approve
-                    result._sender = msg_data.get('sender', '')
-                    if _should_auto_approve(tracker, result, contacts):
+                    if _should_auto_approve(tracker, result, contacts, msg_data.get('sender', '')):
                         classification['classifier_method'] = f"Auto ({classifier_name})"
                         pending_id = tracker.store_pending_email(msg_data, classification)
                         _store_attachments(tracker, pending_id, msg_data)
