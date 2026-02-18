@@ -478,14 +478,14 @@ class LLMClassifierBase(EmailClassifier):
 
     def _full_json_schema(self):
         """JSON schema for Gemini structured output (combined scope+classify)."""
-        doc_types = list(self._type_keywords.keys())
-        disciplines = list(self._discipline_keywords.keys())
+        doc_types = [t for t in self._type_keywords.keys() if t]
+        disciplines = [d for d in self._discipline_keywords.keys() if d]
         return {
             "type": "object",
             "properties": {
                 "in_scope": {"type": "boolean"},
-                "doc_type": {"type": "string", "enum": doc_types + ['']},
-                "discipline": {"type": "string", "enum": disciplines + ['']},
+                "doc_type": {"type": "string", "enum": doc_types},
+                "discipline": {"type": "string", "enum": disciplines},
                 "department": {"type": "string"},
                 "response_required": {"type": "boolean"},
                 "references": {"type": "array", "items": {"type": "string"}},
@@ -732,8 +732,8 @@ class GeminiClassifier(LLMClassifierBase):
         }
 
     def _classify_json_schema(self):
-        doc_types = list(self._type_keywords.keys())
-        disciplines = list(self._discipline_keywords.keys())
+        doc_types = [t for t in self._type_keywords.keys() if t]
+        disciplines = [d for d in self._discipline_keywords.keys() if d]
         return {
             "type": "object",
             "properties": {
