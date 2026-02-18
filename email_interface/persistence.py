@@ -128,6 +128,8 @@ _MIGRATIONS = [
     ("processed_messages", "conversation_id", "INTEGER"),
     ("pending_emails", "ai_summary", "TEXT"),
     ("pending_emails", "ai_priority", "TEXT DEFAULT 'medium'"),
+    ("pending_emails", "user_corrections", "TEXT"),
+    ("pending_emails", "auto_approved", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -699,6 +701,144 @@ class ProcessingTracker:
             if contact:
                 result[em.lower().strip()] = contact
         return result
+
+    # --- Accuracy & Correction Stats ---
+
+    def get_accuracy_stats(self):
+        """Per-classifier accuracy based on user corrections.
+
+        Returns dict with per_classifier list and common_corrections patterns.
+        """
+        per_classifier = []
+        try:
+            self._conn.row_factory = sqlite3.Row
+            cur = self._conn.execute(
+                """SELECT classifier_method,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN user_corrections IS NOT NULL THEN 1 ELSE 0 END) as corrected,
+                          AVG(confidence) as avg_confidence
+                   FROM pending_emails
+                   WHERE status = 'approved' AND auto_approved = 0
+                         AND classifier_method IS NOT NULL AND classifier_method != ''
+                   GROUP BY classifier_method
+                   ORDER BY total DESC"""
+            )
+            for row in cur.fetchall():
+                total = row['total']
+                corrected = row['corrected']
+                accuracy = round((total - corrected) / total * 100, 1) if total > 0 else 0
+                per_classifier.append({
+                    'method': row['classifier_method'],
+                    'total': total,
+                    'corrected': corrected,
+                    'accuracy_pct': accuracy,
+                    'avg_confidence': round(row['avg_confidence'], 2) if row['avg_confidence'] else 0,
+                })
+            self._conn.row_factory = None
+        except sqlite3.OperationalError:
+            pass
+
+        # Common corrections patterns
+        common_corrections = {}
+        try:
+            cur = self._conn.execute(
+                """SELECT user_corrections FROM pending_emails
+                   WHERE user_corrections IS NOT NULL AND status = 'approved'"""
+            )
+            for row in cur.fetchall():
+                try:
+                    corr = json.loads(row[0])
+                    for field, (old_val, new_val) in corr.items():
+                        if field not in common_corrections:
+                            common_corrections[field] = {}
+                        key = f"{old_val or '(empty)'} -> {new_val}"
+                        common_corrections[field][key] = common_corrections[field].get(key, 0) + 1
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        except sqlite3.OperationalError:
+            pass
+
+        # Sort corrections by frequency
+        for field in common_corrections:
+            items = sorted(common_corrections[field].items(), key=lambda x: x[1], reverse=True)
+            common_corrections[field] = [{'pattern': k, 'count': v} for k, v in items[:10]]
+
+        return {
+            'per_classifier': per_classifier,
+            'common_corrections': common_corrections,
+        }
+
+    # --- Contact Learning Queries ---
+
+    def count_approved_from_sender(self, email):
+        """Count how many approved emails are from this sender."""
+        cur = self._conn.execute(
+            "SELECT COUNT(*) FROM pending_emails WHERE LOWER(sender) = ? AND status = 'approved'",
+            (email.lower().strip(),),
+        )
+        return cur.fetchone()[0]
+
+    def get_most_common_department_for_sender(self, email):
+        """Get the most frequently assigned department for a sender."""
+        cur = self._conn.execute(
+            """SELECT department, COUNT(*) as cnt FROM pending_emails
+               WHERE LOWER(sender) = ? AND status = 'approved'
+                     AND department IS NOT NULL AND department != ''
+               GROUP BY department ORDER BY cnt DESC LIMIT 1""",
+            (email.lower().strip(),),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    def get_suggested_contacts(self, min_emails=2):
+        """Find senders NOT in contacts but with min_emails+ approved emails.
+
+        Returns list of dicts: sender, sender_name, email_count, department, company.
+        """
+        results = []
+        try:
+            self._conn.row_factory = sqlite3.Row
+            cur = self._conn.execute(
+                """SELECT sender, sender_name, COUNT(*) as email_count
+                   FROM pending_emails
+                   WHERE status = 'approved'
+                     AND sender IS NOT NULL AND sender != ''
+                     AND LOWER(sender) NOT IN (
+                         SELECT LOWER(email) FROM contacts WHERE is_active = 1
+                     )
+                   GROUP BY LOWER(sender)
+                   HAVING COUNT(*) >= ?
+                   ORDER BY email_count DESC LIMIT 20""",
+                (min_emails,),
+            )
+            for row in cur.fetchall():
+                sender = row['sender']
+                dept = self.get_most_common_department_for_sender(sender) or ''
+                # Extract company from domain
+                company = ''
+                if sender and '@' in sender:
+                    domain = sender.split('@')[1].lower()
+                    parts = domain.split('.')
+                    if len(parts) >= 3 and parts[-2] in ('co', 'com', 'org', 'net', 'ac'):
+                        name = parts[-3]
+                    elif len(parts) >= 2:
+                        name = parts[-2]
+                    else:
+                        name = parts[0]
+                    generic = {'gmail', 'yahoo', 'hotmail', 'outlook', 'live', 'aol', 'icloud', 'mail', 'protonmail'}
+                    if name not in generic:
+                        company = name.capitalize()
+                results.append({
+                    'sender': sender,
+                    'sender_name': row['sender_name'] or '',
+                    'email_count': row['email_count'],
+                    'department': dept,
+                    'company': company,
+                })
+            self._conn.row_factory = None
+        except sqlite3.OperationalError:
+            pass
+        return results
 
     # --- Settings (key/value store) ---
 

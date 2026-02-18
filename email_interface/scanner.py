@@ -12,6 +12,7 @@ import logging
 import os
 from datetime import datetime
 
+from email_interface.approval import perform_full_approval
 from email_interface.auth import create_auth_handler
 from email_interface.classifier import create_classifier
 from email_interface.config import load_config, resolve_path
@@ -67,6 +68,36 @@ def _auto_assign(tracker, msg_data, classification, existing_transmittal):
     return pending_id
 
 
+def _should_auto_approve(tracker, result, contacts_list):
+    """Decide whether to auto-approve an email based on confidence and sender trust.
+
+    Args:
+        tracker: ProcessingTracker instance
+        result: ClassificationResult from classifier
+        contacts_list: List of active contact dicts
+
+    Returns:
+        True if the email should be auto-approved.
+    """
+    enabled = tracker.get_setting('auto_approve_enabled')
+    if enabled != 'true':
+        return False
+
+    confidence = result.confidence or 0
+
+    # Check if sender is a known contact
+    sender = getattr(result, '_sender', '') or ''
+    contact_emails = {c['email'].lower() for c in contacts_list}
+    is_known = sender.lower().strip() in contact_emails
+
+    if is_known:
+        threshold = float(tracker.get_setting('auto_approve_threshold_known') or '0.75')
+    else:
+        threshold = float(tracker.get_setting('auto_approve_threshold_unknown') or '0.90')
+
+    return confidence >= threshold
+
+
 def scan_and_queue(base_dir=None, progress_callback=None):
     """Fetch unread emails, classify, and store in-scope ones as pending.
 
@@ -115,7 +146,8 @@ def scan_and_queue(base_dir=None, progress_callback=None):
         logger.info("Forwarded mailbox mode: all emails treated as in-scope")
 
     counts = {'scanned': 0, 'queued': 0, 'skipped': 0, 'out_of_scope': 0,
-              'errors': 0, 'auto_assigned': 0, 'inherited': 0, 'total': 0}
+              'errors': 0, 'auto_assigned': 0, 'inherited': 0, 'total': 0,
+              'auto_approved': 0}
 
     def _progress(subject='', phase='Scanning'):
         if progress_callback:
@@ -227,7 +259,29 @@ def scan_and_queue(base_dir=None, progress_callback=None):
                     continue
 
                 classification = result.to_dict()
-                classification['classifier_method'] = getattr(classifier, 'name', '')
+                classifier_name = getattr(classifier, 'name', '')
+                classification['classifier_method'] = classifier_name
+
+                # Check for auto-approve
+                result._sender = msg_data.get('sender', '')
+                if _should_auto_approve(tracker, result, contacts):
+                    classification['classifier_method'] = f"Auto ({classifier_name})"
+                    pending_id = tracker.store_pending_email(msg_data, classification)
+                    _store_attachments(tracker, pending_id, msg_data)
+                    tracker._conn.execute(
+                        "UPDATE pending_emails SET auto_approved = 1 WHERE id = ?",
+                        (pending_id,))
+                    tracker._conn.commit()
+                    perform_full_approval(tracker, pending_id, base_dir)
+                    imap_client.mark_as_read(msg_id)
+                    counts['auto_approved'] += 1
+                    counts['queued'] += 1
+                    _progress(subject)
+                    logger.info("Auto-approved: %s - %s [%s/%s] (conf=%.2f)",
+                                message_id, subject,
+                                result.doc_type, result.discipline,
+                                result.confidence or 0)
+                    continue
 
                 # Store as pending
                 pending_id = tracker.store_pending_email(msg_data, classification)
@@ -247,10 +301,10 @@ def scan_and_queue(base_dir=None, progress_callback=None):
                 counts['errors'] += 1
                 _progress('')
 
-        logger.info("Scan complete: %d scanned, %d queued, %d inherited, %d auto-assigned, "
-                     "%d skipped, %d out-of-scope, %d errors",
-                     counts['scanned'], counts['queued'], counts['inherited'],
-                     counts['auto_assigned'], counts['skipped'],
+        logger.info("Scan complete: %d scanned, %d queued, %d auto-approved, %d inherited, "
+                     "%d auto-assigned, %d skipped, %d out-of-scope, %d errors",
+                     counts['scanned'], counts['queued'], counts['auto_approved'],
+                     counts['inherited'], counts['auto_assigned'], counts['skipped'],
                      counts['out_of_scope'], counts['errors'])
 
     finally:
@@ -308,7 +362,7 @@ def scan_all_emails(base_dir=None, progress_callback=None):
     counts = {
         'total': 0, 'scanned': 0, 'queued': 0, 'skipped': 0,
         'out_of_scope': 0, 'errors': 0, 'auto_assigned': 0,
-        'already_known': 0, 'inherited': 0,
+        'already_known': 0, 'inherited': 0, 'auto_approved': 0,
     }
 
     def _progress(subject='', phase=''):
@@ -447,7 +501,27 @@ def scan_all_emails(base_dir=None, progress_callback=None):
                         continue
 
                     classification = result.to_dict()
-                    classification['classifier_method'] = getattr(classifier, 'name', '')
+                    classifier_name = getattr(classifier, 'name', '')
+                    classification['classifier_method'] = classifier_name
+
+                    # Check for auto-approve
+                    result._sender = msg_data.get('sender', '')
+                    if _should_auto_approve(tracker, result, contacts):
+                        classification['classifier_method'] = f"Auto ({classifier_name})"
+                        pending_id = tracker.store_pending_email(msg_data, classification)
+                        _store_attachments(tracker, pending_id, msg_data)
+                        tracker._conn.execute(
+                            "UPDATE pending_emails SET auto_approved = 1 WHERE id = ?",
+                            (pending_id,))
+                        tracker._conn.commit()
+                        perform_full_approval(tracker, pending_id, base_dir)
+                        counts['auto_approved'] += 1
+                        counts['queued'] += 1
+                        logger.info("Auto-approved: %s [%s/%s] (conf=%.2f)",
+                                    msg_data.get('subject', ''),
+                                    result.doc_type, result.discipline,
+                                    result.confidence or 0)
+                        continue
 
                     pending_id = tracker.store_pending_email(msg_data, classification)
                     _store_attachments(tracker, pending_id, msg_data)
@@ -466,10 +540,10 @@ def scan_all_emails(base_dir=None, progress_callback=None):
                         len(needs_classification))
 
         logger.info(
-            "Full scan complete: %d total, %d new queued, %d inherited, %d auto-assigned, "
-            "%d already known, %d skipped, %d out-of-scope, %d errors",
-            counts['total'], counts['queued'], counts['inherited'],
-            counts['auto_assigned'], counts['already_known'],
+            "Full scan complete: %d total, %d new queued, %d auto-approved, %d inherited, "
+            "%d auto-assigned, %d already known, %d skipped, %d out-of-scope, %d errors",
+            counts['total'], counts['queued'], counts['auto_approved'],
+            counts['inherited'], counts['auto_assigned'], counts['already_known'],
             counts['skipped'], counts['out_of_scope'], counts['errors'],
         )
 

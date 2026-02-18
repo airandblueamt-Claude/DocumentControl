@@ -134,7 +134,7 @@ scan_progress = {
     'active': False, 'total': 0, 'scanned': 0,
     'queued': 0, 'skipped': 0, 'out_of_scope': 0,
     'errors': 0, 'auto_assigned': 0, 'inherited': 0,
-    'already_known': 0,
+    'already_known': 0, 'auto_approved': 0,
     'current_subject': '', 'phase': '',
 }
 
@@ -230,6 +230,7 @@ def _reset_scan_progress():
     scan_progress['auto_assigned'] = 0
     scan_progress['inherited'] = 0
     scan_progress['already_known'] = 0
+    scan_progress['auto_approved'] = 0
     scan_progress['current_subject'] = ''
     scan_progress['phase'] = ''
 
@@ -245,6 +246,7 @@ def _scan_progress_callback(counts, subject, phase=''):
     scan_progress['auto_assigned'] = counts.get('auto_assigned', 0)
     scan_progress['inherited'] = counts.get('inherited', 0)
     scan_progress['already_known'] = counts.get('already_known', 0)
+    scan_progress['auto_approved'] = counts.get('auto_approved', 0)
     scan_progress['current_subject'] = subject or ''
     if phase:
         scan_progress['phase'] = phase
@@ -290,8 +292,9 @@ def run_scan():
         scan_state['last_scan_time'] = datetime.now().isoformat()
         auto_str = f", {counts['auto_assigned']} auto-assigned" if counts.get('auto_assigned') else ''
         inherited_str = f", {counts['inherited']} inherited" if counts.get('inherited') else ''
+        auto_appr_str = f", {counts['auto_approved']} auto-approved" if counts.get('auto_approved') else ''
         scan_state['last_scan_result'] = (
-            f"{counts['queued']} queued{auto_str}{inherited_str}, "
+            f"{counts['queued']} queued{auto_appr_str}{auto_str}{inherited_str}, "
             f"{counts['out_of_scope']} out-of-scope, {counts['skipped']} skipped"
         )
         scan_state['last_scan_ok'] = counts['errors'] == 0
@@ -485,7 +488,8 @@ def _query_counts(conn):
     """Status counts from pending_emails."""
     counts = {'pending_review': 0, 'approved': 0, 'rejected': 0,
               'out_of_scope': 0, 'total_processed': 0,
-              'active_conversations': 0, 'response_required_pending': 0}
+              'active_conversations': 0, 'response_required_pending': 0,
+              'auto_approved': 0}
     try:
         for row in conn.execute("SELECT status, COUNT(*) FROM pending_emails GROUP BY status"):
             counts[row[0]] = row[1]
@@ -497,6 +501,12 @@ def _query_counts(conn):
         counts['response_required_pending'] = conn.execute(
             "SELECT COUNT(*) FROM pending_emails WHERE status = 'pending_review' AND response_required = 1"
         ).fetchone()[0]
+        try:
+            counts['auto_approved'] = conn.execute(
+                "SELECT COUNT(*) FROM pending_emails WHERE auto_approved = 1"
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
     except sqlite3.OperationalError:
         pass
     return counts
@@ -687,7 +697,8 @@ def _empty_activity_summary():
     return {
         'counts': {'pending_review': 0, 'approved': 0, 'rejected': 0,
                     'out_of_scope': 0, 'total_processed': 0,
-                    'active_conversations': 0, 'response_required_pending': 0},
+                    'active_conversations': 0, 'response_required_pending': 0,
+                    'auto_approved': 0},
         'time_series': {
             'today': {'scanned': 0, 'approved': 0, 'rejected': 0, 'processed': 0},
             'this_week': {'scanned': 0, 'approved': 0, 'rejected': 0, 'processed': 0},
@@ -826,10 +837,13 @@ def api_emails():
     conn.row_factory = sqlite3.Row
     try:
         base_where = ""
+        join_where = ""
         params = []
         if query:
             base_where = """WHERE (subject LIKE ? OR sender LIKE ?
                             OR sender_name LIKE ? OR transmittal_no LIKE ?)"""
+            join_where = """WHERE (pm.subject LIKE ? OR pm.sender LIKE ?
+                            OR pm.sender_name LIKE ? OR pm.transmittal_no LIKE ?)"""
             like_q = f'%{query}%'
             params = [like_q, like_q, like_q, like_q]
 
@@ -841,12 +855,15 @@ def api_emails():
 
         # Fetch page — get all emails then group by transmittal
         cur = conn.execute(
-            f"""SELECT transmittal_no, processed_at, sender, sender_name,
-                      to_recipients, cc_recipients, subject, attachment_count,
-                      doc_type, discipline, department, response_required, references_json,
-                      conversation_id, message_id
-               FROM processed_messages {base_where}
-               ORDER BY processed_at DESC LIMIT ? OFFSET ?""",
+            f"""SELECT pm.transmittal_no, pm.processed_at, pm.sender, pm.sender_name,
+                      pm.to_recipients, pm.cc_recipients, pm.subject, pm.attachment_count,
+                      pm.doc_type, pm.discipline, pm.department, pm.response_required,
+                      pm.references_json, pm.conversation_id, pm.message_id,
+                      pe.classifier_method, pe.auto_approved
+               FROM processed_messages pm
+               LEFT JOIN pending_emails pe ON pm.message_id = pe.message_id
+               {join_where}
+               ORDER BY pm.processed_at DESC LIMIT ? OFFSET ?""",
             params + [per_page, page * per_page],
         )
         emails = []
@@ -981,92 +998,16 @@ def api_pending_detail(pending_id):
 
 @app.route('/api/pending/<int:pending_id>/approve', methods=['POST'])
 def api_approve(pending_id):
+    from email_interface.approval import perform_full_approval
     edits = request.get_json(silent=True) or {}
     tracker = _get_tracker()
     try:
-        result = tracker.approve_pending_email(pending_id, edits=edits)
-        transmittal_no = result['transmittal_no']
-        pe = result['pending_email']
-
-        # Save attachments from blobs (with signature filtering)
-        attachments = tracker.get_pending_attachments(pending_id)
-        saved_files = []
-        if attachments:
-            from email_interface.attachment_handler import AttachmentHandler
-            from email_interface.config import load_config, resolve_path
-            email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
-            att_cfg = email_cfg.get('attachments', {})
-            handler = AttachmentHandler(
-                base_path=resolve_path(att_cfg.get('base_path', 'Attachments'), BASE_DIR),
-                max_size_mb=att_cfg.get('max_size_mb', 25),
-                allowed_extensions=att_cfg.get('allowed_extensions'),
-                skip_signature_attachments=att_cfg.get('skip_signature_attachments', True),
-            )
-            for att in attachments:
-                # Skip signature images
-                if handler.is_signature_attachment(
-                    att['filename'], att['content_type'], att.get('size') or len(att.get('data', b''))
-                ):
-                    logger.info("Skipping signature attachment: %s", att['filename'])
-                    continue
-                result_att = handler.save_single_attachment(
-                    filename=att['filename'],
-                    data=att['data'],
-                    content_type=att['content_type'],
-                    email_date=pe.get('email_date'),
-                    transmittal_no=transmittal_no,
-                )
-                if result_att:
-                    saved_files.append(result_att)
-
-        # Update attachment_folder on the pending record
-        att_folder = ''
-        if saved_files:
-            att_folder = os.path.dirname(saved_files[0]['path'])
-            conn = sqlite3.connect(_get_db_path())
-            conn.execute(
-                "UPDATE pending_emails SET attachment_folder = ? WHERE id = ?",
-                (att_folder, pending_id),
-            )
-            conn.commit()
-            conn.close()
-
-        # Log to Excel
-        from email_monitor import update_excel_log
-        from email_interface.config import load_config, resolve_path
-        email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
-        excel_path = resolve_path(
-            email_cfg.get('excel', {}).get('output_path', 'logs/correspondence_log.xlsx'),
-            BASE_DIR,
-        )
-
-        to_list = json.loads(pe.get('to_recipients', '[]'))
-        cc_list = json.loads(pe.get('cc_recipients', '[]'))
-        refs = json.loads(pe.get('references_json', '[]'))
-
-        excel_entry = {
-            'transmittal_no': transmittal_no,
-            'date': pe.get('email_date'),
-            'sender': pe.get('sender', ''),
-            'to': to_list,
-            'cc': cc_list,
-            'subject': pe.get('subject', ''),
-            'references': refs,
-            'doc_type': pe.get('doc_type', ''),
-            'discipline': pe.get('discipline', ''),
-            'response_required': pe.get('response_required'),
-            'attachments': [{}] * pe.get('attachment_count', 0),
-            'attachments_saved': saved_files,
-            'message_id': pe.get('message_id', ''),
-        }
-        update_excel_log([excel_entry], excel_path)
-
+        result = perform_full_approval(tracker, pending_id, BASE_DIR, edits=edits)
         return jsonify({
-            'message': f'Approved as {transmittal_no}',
-            'transmittal_no': transmittal_no,
-            'attachment_folder': att_folder,
+            'message': f"Approved as {result['transmittal_no']}",
+            'transmittal_no': result['transmittal_no'],
+            'attachment_folder': result['attachment_folder'],
         })
-
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     finally:
@@ -1170,6 +1111,7 @@ def api_processed_attachments(message_id):
 
 @app.route('/api/pending/bulk-approve', methods=['POST'])
 def api_bulk_approve():
+    from email_interface.approval import perform_full_approval
     data = request.get_json(silent=True) or {}
     ids = data.get('ids', [])
     if not ids:
@@ -1181,80 +1123,125 @@ def api_bulk_approve():
     try:
         for pid in ids:
             try:
-                result = tracker.approve_pending_email(pid)
-                transmittal_no = result['transmittal_no']
-                pe = result['pending_email']
-
-                # Save attachments (with signature filtering)
-                attachments = tracker.get_pending_attachments(pid)
-                saved_files = []
-                if attachments:
-                    from email_interface.attachment_handler import AttachmentHandler
-                    from email_interface.config import load_config, resolve_path
-                    email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
-                    att_cfg = email_cfg.get('attachments', {})
-                    handler = AttachmentHandler(
-                        base_path=resolve_path(att_cfg.get('base_path', 'Attachments'), BASE_DIR),
-                        max_size_mb=att_cfg.get('max_size_mb', 25),
-                        allowed_extensions=att_cfg.get('allowed_extensions'),
-                        skip_signature_attachments=att_cfg.get('skip_signature_attachments', True),
-                    )
-                    for att in attachments:
-                        if handler.is_signature_attachment(
-                            att['filename'], att['content_type'],
-                            att.get('size') or len(att.get('data', b''))
-                        ):
-                            continue
-                        result_att = handler.save_single_attachment(
-                            filename=att['filename'],
-                            data=att['data'],
-                            content_type=att['content_type'],
-                            email_date=pe.get('email_date'),
-                            transmittal_no=transmittal_no,
-                        )
-                        if result_att:
-                            saved_files.append(result_att)
-
-                att_folder = ''
-                if saved_files:
-                    att_folder = os.path.dirname(saved_files[0]['path'])
-
-                # Log to Excel
-                from email_monitor import update_excel_log
-                from email_interface.config import load_config, resolve_path
-                email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
-                excel_path = resolve_path(
-                    email_cfg.get('excel', {}).get('output_path', 'logs/correspondence_log.xlsx'),
-                    BASE_DIR,
-                )
-                to_list = json.loads(pe.get('to_recipients', '[]'))
-                cc_list = json.loads(pe.get('cc_recipients', '[]'))
-                refs = json.loads(pe.get('references_json', '[]'))
-
-                excel_entry = {
-                    'transmittal_no': transmittal_no,
-                    'date': pe.get('email_date'),
-                    'sender': pe.get('sender', ''),
-                    'to': to_list,
-                    'cc': cc_list,
-                    'subject': pe.get('subject', ''),
-                    'references': refs,
-                    'doc_type': pe.get('doc_type', ''),
-                    'discipline': pe.get('discipline', ''),
-                    'response_required': pe.get('response_required'),
-                    'attachments': [{}] * pe.get('attachment_count', 0),
-                    'attachments_saved': saved_files,
-                    'message_id': pe.get('message_id', ''),
-                }
-                update_excel_log([excel_entry], excel_path)
-
-                results.append({'id': pid, 'transmittal_no': transmittal_no})
+                result = perform_full_approval(tracker, pid, BASE_DIR)
+                results.append({'id': pid, 'transmittal_no': result['transmittal_no']})
             except Exception as e:
                 errors.append({'id': pid, 'error': str(e)})
     finally:
         tracker.close()
 
     return jsonify({'approved': results, 'errors': errors})
+
+
+@app.route('/api/accuracy')
+def api_accuracy():
+    """Return per-classifier accuracy stats and common correction patterns."""
+    tracker = _get_tracker()
+    try:
+        stats = tracker.get_accuracy_stats()
+        return jsonify(stats)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/contacts/suggested')
+def api_contacts_suggested():
+    """Return senders not in contacts but with 2+ approved emails."""
+    tracker = _get_tracker()
+    try:
+        min_emails = int(request.args.get('min_emails', 1))
+        suggested = tracker.get_suggested_contacts(min_emails=min_emails)
+        return jsonify({'suggested': suggested})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/contacts/suggested/add', methods=['POST'])
+def api_contacts_suggested_add():
+    """One-click add a suggested contact."""
+    data = request.get_json(silent=True) or {}
+    email = data.get('email', '').strip()
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    tracker = _get_tracker()
+    try:
+        existing = tracker.find_contact_by_email(email)
+        if existing:
+            return jsonify({'error': f'Contact with email "{email}" already exists'}), 409
+
+        name = data.get('name', '').strip() or email.split('@')[0]
+        company = data.get('company', '').strip()
+        department = data.get('department', '').strip()
+
+        contact_id = tracker.add_contact(
+            name=name,
+            email=email,
+            company=company,
+            department=department,
+            notes='Added from suggested contacts',
+        )
+        return jsonify({'id': contact_id, 'message': f'Contact "{name}" added'}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({'error': f'Contact with email "{email}" already exists'}), 409
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/auto-approve', methods=['GET'])
+def api_get_auto_approve_settings():
+    """Return all auto-processing settings."""
+    tracker = _get_tracker()
+    try:
+        settings = {
+            'auto_approve_enabled': tracker.get_setting('auto_approve_enabled') == 'true',
+            'auto_approve_threshold_known': float(tracker.get_setting('auto_approve_threshold_known') or '0.75'),
+            'auto_approve_threshold_unknown': float(tracker.get_setting('auto_approve_threshold_unknown') or '0.90'),
+            'auto_learn_contacts_enabled': tracker.get_setting('auto_learn_contacts_enabled') != 'false',
+            'auto_learn_contacts_threshold': int(tracker.get_setting('auto_learn_contacts_threshold') or '2'),
+        }
+        return jsonify(settings)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/auto-approve', methods=['PUT'])
+def api_set_auto_approve_settings():
+    """Update auto-processing settings with validation."""
+    data = request.get_json(silent=True) or {}
+    tracker = _get_tracker()
+    try:
+        if 'auto_approve_enabled' in data:
+            tracker.set_setting('auto_approve_enabled',
+                                'true' if data['auto_approve_enabled'] else 'false')
+
+        if 'auto_approve_threshold_known' in data:
+            val = float(data['auto_approve_threshold_known'])
+            if not 0.5 <= val <= 1.0:
+                return jsonify({'error': 'Threshold must be between 0.50 and 1.00'}), 400
+            tracker.set_setting('auto_approve_threshold_known', str(val))
+
+        if 'auto_approve_threshold_unknown' in data:
+            val = float(data['auto_approve_threshold_unknown'])
+            if not 0.5 <= val <= 1.0:
+                return jsonify({'error': 'Threshold must be between 0.50 and 1.00'}), 400
+            tracker.set_setting('auto_approve_threshold_unknown', str(val))
+
+        if 'auto_learn_contacts_enabled' in data:
+            tracker.set_setting('auto_learn_contacts_enabled',
+                                'true' if data['auto_learn_contacts_enabled'] else 'false')
+
+        if 'auto_learn_contacts_threshold' in data:
+            val = int(data['auto_learn_contacts_threshold'])
+            if val < 1:
+                return jsonify({'error': 'Threshold must be at least 1'}), 400
+            tracker.set_setting('auto_learn_contacts_threshold', str(val))
+
+        return jsonify({'message': 'Settings saved'})
+    except (ValueError, TypeError) as e:
+        return jsonify({'error': f'Invalid value: {e}'}), 400
+    finally:
+        tracker.close()
 
 
 @app.route('/api/reclassify', methods=['POST'])

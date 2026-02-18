@@ -1046,6 +1046,10 @@
                     <div class="kpi-value" id="kpiConversations">--</div>
                     <div class="kpi-label">Conversations</div>
                 </div>
+                <div class="kpi-card border-purple">
+                    <div class="kpi-value" id="kpiAutoApproved">--</div>
+                    <div class="kpi-label">Auto-Approved</div>
+                </div>
                 <div class="kpi-card border-warn">
                     <div class="kpi-value text-warn" id="kpiRejected">--</div>
                     <div class="kpi-label">Rejected</div>
@@ -1116,6 +1120,45 @@
                 <div class="summary-card-title">Classifier Performance</div>
                 <div class="clf-perf-wrap" id="clfPerfContainer">
                     <div style="font-size:12px;color:var(--text-light)">Loading...</div>
+                </div>
+                <div id="commonCorrectionsContainer" style="margin-top:12px"></div>
+            </div>
+
+            <!-- Automation Settings (collapsible) -->
+            <div class="summary-card" style="margin-bottom:16px">
+                <div class="summary-card-title" onclick="toggleAutoSettings()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                    Automation Settings
+                    <span id="autoSettingsToggle" style="font-size:12px;color:var(--text-muted)">&#9660;</span>
+                </div>
+                <div id="autoSettingsBody" style="display:none;padding-top:12px">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px">
+                        <div>
+                            <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer">
+                                <input type="checkbox" id="autoApproveEnabled" onchange="saveAutoSettings()">
+                                <span style="font-weight:600">Auto-approve high-confidence emails</span>
+                            </label>
+                            <div style="margin-bottom:12px">
+                                <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Known contact threshold: <strong id="threshKnownVal">0.75</strong></label>
+                                <input type="range" id="threshKnown" min="0.50" max="1.00" step="0.05" value="0.75" oninput="document.getElementById('threshKnownVal').textContent=this.value" style="width:100%">
+                            </div>
+                            <div style="margin-bottom:12px">
+                                <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Unknown sender threshold: <strong id="threshUnknownVal">0.90</strong></label>
+                                <input type="range" id="threshUnknown" min="0.50" max="1.00" step="0.05" value="0.90" oninput="document.getElementById('threshUnknownVal').textContent=this.value" style="width:100%">
+                            </div>
+                        </div>
+                        <div>
+                            <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer">
+                                <input type="checkbox" id="autoLearnEnabled" onchange="saveAutoSettings()">
+                                <span style="font-weight:600">Auto-learn contacts</span>
+                            </label>
+                            <div style="margin-bottom:12px">
+                                <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Learn after <strong id="learnThreshVal">2</strong> approvals</label>
+                                <input type="range" id="learnThresh" min="1" max="10" step="1" value="2" oninput="document.getElementById('learnThreshVal').textContent=this.value" style="width:100%">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="saveAutoSettings()" style="margin-top:8px">Save Settings</button>
+                    <span id="autoSettingsStatus" style="margin-left:8px;font-size:12px;color:var(--text-muted)"></span>
                 </div>
             </div>
 
@@ -1272,6 +1315,14 @@
     <!-- CONTACTS -->
     <div class="tab-panel" id="tab-contacts">
         <div class="container">
+            <!-- Suggested Contacts -->
+            <div id="suggestedContactsPanel" style="display:none;margin-bottom:16px">
+                <div class="table-card">
+                    <div class="table-toolbar"><div class="toolbar-top"><h2>Suggested Contacts</h2></div></div>
+                    <div style="font-size:12px;color:var(--text-muted);padding:0 16px 8px">Frequent senders not yet in your contacts list. Click "Add" to add them.</div>
+                    <div id="suggestedContactsWrap"></div>
+                </div>
+            </div>
             <div class="table-card">
                 <div class="table-toolbar"><div class="toolbar-top"><h2>Expected Senders</h2></div></div>
                 <div class="add-form">
@@ -1442,7 +1493,7 @@ function switchTab(tab) {
     if(tab==='review') fetchPending();
     if(tab==='processed'){fetchEmails();fetchStatus();}
     if(tab==='departments') fetchDepartments();
-    if(tab==='contacts') fetchContacts();
+    if(tab==='contacts'){fetchContacts();fetchSuggestedContacts();}
 }
 
 // ---- Scanner ----
@@ -2022,7 +2073,8 @@ function renderProcessedTable(){
         html+='<div class="email-card">';
         html+='<div class="card-row"><div style="flex:1;min-width:0">';
         var fuLabel=fuCount>0?' <span class="thread-badge thread-count">'+(fuCount+1)+' emails</span>':'';
-        html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+fuLabel+'</div>';
+        var autoLabel=(e.classifier_method&&e.classifier_method.indexOf('Auto')===0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto</span>':'';
+        html+='<div style="font-weight:700;font-size:12px;color:var(--primary)">'+esc(e.transmittal_no)+autoLabel+fuLabel+'</div>';
         html+='<div class="card-subject" style="color:var(--text);cursor:default">'+esc(e.subject||'(no subject)')+'</div>';
         html+='<div class="card-meta">';
         html+='<span>'+esc(e.sender_name||e.sender)+'</span>';
@@ -2064,8 +2116,9 @@ function renderProcessedTable(){
         if(e.sender_company) sd+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
         var rc=e.response_required?'resp-yes':'resp-no', rt=e.response_required?'Yes':'No';
         var fuBtn=fups.length>0?'<button class="expand-btn" id="expand-'+esc(e.transmittal_no)+'" onclick="toggleFollowUps(\''+esc(e.transmittal_no)+'\')">+'+fups.length+'</button>':'';
+        var autoTag3=(e.classifier_method&&e.classifier_method.indexOf('Auto')===0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto</span>':'';
         html+='<tr><td class="col-num">'+idx+'</td>'+
-            '<td><strong>'+esc(e.transmittal_no)+'</strong> '+fuBtn+'</td>'+
+            '<td><strong>'+esc(e.transmittal_no)+'</strong>'+autoTag3+' '+fuBtn+'</td>'+
             '<td style="white-space:nowrap">'+fmtTime(e.processed_at)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
@@ -2176,7 +2229,8 @@ function fetchContacts(){
         for(var i=0;i<cs.length;i++){
             var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';
             html+='<div class="email-card">';
-            html+='<div class="card-row"><div style="flex:1"><strong>'+esc(c.name)+'</strong> <span class="'+sc+'">'+st+'</span></div></div>';
+            var autoTag=(c.notes&&c.notes.indexOf('Auto-learned')>=0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto-learned</span>':'';
+            html+='<div class="card-row"><div style="flex:1"><strong>'+esc(c.name)+'</strong> '+autoTag+' <span class="'+sc+'">'+st+'</span></div></div>';
             html+='<div class="card-meta">';
             html+='<span>'+esc(c.email)+'</span>';
             if(c.company) html+='<span>'+esc(c.company)+'</span>';
@@ -2193,7 +2247,8 @@ function fetchContacts(){
         html+='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Company</th><th>Dept.</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
         for(var i=0;i<cs.length;i++){
             var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';
-            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(c.name)+'</strong></td><td>'+esc(c.email)+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.department||'')+'</td><td>'+esc(c.notes||'')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost btn-sm" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button></div></td></tr>';
+            var autoTag2=(c.notes&&c.notes.indexOf('Auto-learned')>=0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto-learned</span>':'';
+            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(c.name)+'</strong>'+autoTag2+'</td><td>'+esc(c.email)+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.department||'')+'</td><td>'+esc(c.notes||'')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost btn-sm" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button></div></td></tr>';
         }
         html+='</tbody></table></div>';
         w.innerHTML=html;
@@ -2283,6 +2338,7 @@ function renderKPIs(counts, attn){
     document.getElementById('kpiApproved').textContent = counts.approved;
     document.getElementById('kpiProcessed').textContent = counts.total_processed;
     document.getElementById('kpiConversations').textContent = counts.active_conversations;
+    document.getElementById('kpiAutoApproved').textContent = counts.auto_approved || 0;
     document.getElementById('kpiRejected').textContent = counts.rejected;
     // Color pending red if > 0, green if 0
     var pendEl = document.getElementById('kpiPending');
@@ -2417,17 +2473,142 @@ function renderClassifierPerf(data){
         el.innerHTML = '<div style="font-size:12px;color:var(--text-light);padding:8px 0">No classifier data yet</div>';
         return;
     }
-    var html = '<table class="clf-perf-table"><thead><tr><th>Method</th><th>Emails</th><th>Avg Confidence</th><th>Approved</th><th>Rejected</th><th>Out of Scope</th></tr></thead><tbody>';
+    var html = '<table class="clf-perf-table"><thead><tr><th>Method</th><th>Emails</th><th>Avg Confidence</th><th>Accuracy</th><th>Approved</th><th>Rejected</th><th>Out of Scope</th></tr></thead><tbody>';
     for(var i=0;i<data.length;i++){
         var d = data[i];
         var confPct = Math.round(d.avg_confidence * 100);
+        var accHtml = '<span style="color:var(--text-light)">--</span>';
+        if(d.accuracy_pct !== undefined && d.accuracy_pct !== null){
+            var accColor = d.accuracy_pct >= 90 ? 'var(--success)' : d.accuracy_pct >= 70 ? 'var(--warn)' : 'var(--danger)';
+            accHtml = '<span style="color:'+accColor+';font-weight:600">'+d.accuracy_pct+'%</span>';
+        }
         html += '<tr><td><strong>' + (d.method||'unknown').replace(/</g,'&lt;') + '</strong></td>' +
             '<td>' + d.total + '</td>' +
             '<td>' + confPct + '%<div class="conf-bar"><div class="conf-bar-fill" style="width:' + confPct + '%"></div></div></td>' +
+            '<td>' + accHtml + '</td>' +
             '<td>' + d.approved + '</td><td>' + d.rejected + '</td><td>' + d.out_of_scope + '</td></tr>';
     }
     html += '</tbody></table>';
     el.innerHTML = html;
+    // Fetch accuracy data for accuracy column enrichment + common corrections
+    fetchAccuracyData();
+}
+
+function fetchAccuracyData(){
+    fetch('/api/accuracy').then(function(r){return r.json();}).then(function(d){
+        // Merge accuracy into the classifier perf table
+        if(d.per_classifier && d.per_classifier.length > 0){
+            var table = document.querySelector('#clfPerfContainer .clf-perf-table');
+            if(table){
+                var rows = table.querySelectorAll('tbody tr');
+                for(var i=0;i<rows.length;i++){
+                    var methodCell = rows[i].querySelector('td:first-child strong');
+                    if(!methodCell) continue;
+                    var method = methodCell.textContent;
+                    for(var j=0;j<d.per_classifier.length;j++){
+                        if(d.per_classifier[j].method === method){
+                            var accCell = rows[i].querySelectorAll('td')[3];
+                            var acc = d.per_classifier[j].accuracy_pct;
+                            var accColor = acc >= 90 ? 'var(--success)' : acc >= 70 ? 'var(--warn)' : 'var(--danger)';
+                            accCell.innerHTML = '<span style="color:'+accColor+';font-weight:600">'+acc+'%</span>';
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // Common corrections
+        var ccEl = document.getElementById('commonCorrectionsContainer');
+        if(!ccEl) return;
+        var cc = d.common_corrections || {};
+        var fields = Object.keys(cc);
+        if(fields.length === 0){
+            ccEl.innerHTML = '';
+            return;
+        }
+        var html = '<div style="font-size:12px;color:var(--text-muted);font-weight:600;margin-bottom:6px">Common Corrections</div>';
+        for(var f=0;f<fields.length;f++){
+            var field = fields[f];
+            var items = cc[field];
+            if(!items.length) continue;
+            html += '<div style="margin-bottom:6px"><span style="font-size:11px;text-transform:capitalize;color:var(--text-muted);font-weight:600">'+field.replace(/_/g,' ')+':</span> ';
+            for(var k=0;k<Math.min(items.length,5);k++){
+                html += '<span style="font-size:11px;background:var(--bg);padding:2px 6px;border-radius:4px;margin-right:4px">'+items[k].pattern.replace(/</g,'&lt;')+' ('+items[k].count+'x)</span>';
+            }
+            html += '</div>';
+        }
+        ccEl.innerHTML = html;
+    }).catch(function(){});
+}
+
+// ---- Automation Settings ----
+function toggleAutoSettings(){
+    var body=document.getElementById('autoSettingsBody');
+    var tog=document.getElementById('autoSettingsToggle');
+    if(body.style.display==='none'){body.style.display='block';tog.innerHTML='&#9650;';fetchAutoSettings();}
+    else{body.style.display='none';tog.innerHTML='&#9660;';}
+}
+function fetchAutoSettings(){
+    fetch('/api/settings/auto-approve').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('autoApproveEnabled').checked=d.auto_approve_enabled;
+        document.getElementById('threshKnown').value=d.auto_approve_threshold_known;
+        document.getElementById('threshKnownVal').textContent=d.auto_approve_threshold_known;
+        document.getElementById('threshUnknown').value=d.auto_approve_threshold_unknown;
+        document.getElementById('threshUnknownVal').textContent=d.auto_approve_threshold_unknown;
+        document.getElementById('autoLearnEnabled').checked=d.auto_learn_contacts_enabled;
+        document.getElementById('learnThresh').value=d.auto_learn_contacts_threshold;
+        document.getElementById('learnThreshVal').textContent=d.auto_learn_contacts_threshold;
+    }).catch(function(){});
+}
+function saveAutoSettings(){
+    var data={
+        auto_approve_enabled:document.getElementById('autoApproveEnabled').checked,
+        auto_approve_threshold_known:parseFloat(document.getElementById('threshKnown').value),
+        auto_approve_threshold_unknown:parseFloat(document.getElementById('threshUnknown').value),
+        auto_learn_contacts_enabled:document.getElementById('autoLearnEnabled').checked,
+        auto_learn_contacts_threshold:parseInt(document.getElementById('learnThresh').value)
+    };
+    fetch('/api/settings/auto-approve',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        var st=document.getElementById('autoSettingsStatus');
+        st.textContent='Saved';st.style.color='var(--success)';
+        setTimeout(function(){st.textContent='';},2000);
+    }).catch(function(){showToast('Failed to save','error');});
+}
+
+// ---- Suggested Contacts ----
+function fetchSuggestedContacts(){
+    fetch('/api/contacts/suggested').then(function(r){return r.json();}).then(function(d){
+        var panel=document.getElementById('suggestedContactsPanel');
+        var wrap=document.getElementById('suggestedContactsWrap');
+        var items=d.suggested||[];
+        if(!items.length){panel.style.display='none';return;}
+        panel.style.display='block';
+        var html='<div style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 16px">';
+        for(var i=0;i<items.length;i++){
+            var s=items[i];
+            html+='<div style="background:var(--bg);border-radius:8px;padding:10px 14px;min-width:220px;flex:1;max-width:300px">';
+            html+='<div style="font-weight:600;font-size:13px">'+esc(s.sender_name||s.sender.split('@')[0])+'</div>';
+            html+='<div style="font-size:11px;color:var(--text-muted)">'+esc(s.sender)+'</div>';
+            html+='<div style="font-size:11px;color:var(--text-muted);margin-top:2px">';
+            if(s.company) html+=esc(s.company)+' &middot; ';
+            if(s.department) html+=esc(s.department)+' &middot; ';
+            html+=s.email_count+' emails</div>';
+            html+='<button class="btn btn-success btn-sm" style="margin-top:6px" onclick="addSuggestedContact(\''+esc(s.sender)+'\',\''+esc(s.sender_name||'')+'\',\''+esc(s.company||'')+'\',\''+esc(s.department||'')+'\')">Add</button>';
+            html+='</div>';
+        }
+        html+='</div>';
+        wrap.innerHTML=html;
+    }).catch(function(){});
+}
+function addSuggestedContact(email,name,company,department){
+    fetch('/api/contacts/suggested/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,name:name,company:company,department:department})})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Contact added','success');
+        fetchSuggestedContacts();fetchContacts();
+    }).catch(function(){showToast('Failed','error');});
 }
 
 // ---- Keyboard ----

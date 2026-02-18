@@ -85,6 +85,15 @@ scope_keywords:
   - ifc
   - correspondence
 
+# Auto-Processing Settings
+# These defaults can be overridden from the dashboard Settings panel.
+auto_processing:
+  enabled: false                     # Must be explicitly enabled
+  trusted_sender_threshold: 0.75     # Min confidence for known contacts
+  high_confidence_threshold: 0.90    # Min confidence for unknown senders
+  auto_learn_contacts: true          # Auto-create contacts from frequent senders
+  auto_learn_min_emails: 2           # Min approved emails before auto-adding contact
+
 # Transmittal Settings
 transmittal:
   prefix: "TRN"
