@@ -1728,10 +1728,9 @@ function renderPendingTable() {
                 fetch('/api/pending/'+e.id+'/attachments').then(function(r){return r.json();}).then(function(data){
                     var cell=document.getElementById('att-cell-'+e.id);
                     if(!cell||!data.attachments||!data.attachments.length) return;
-                    var realAtts=data.attachments.filter(function(a){return !a.is_signature;});
-                    if(!realAtts.length) return;
+                    if(!data.attachments.length) return;
                     var links='<div class="att-list">';
-                    realAtts.forEach(function(att){
+                    data.attachments.forEach(function(att){
                         var sz=fmtFileSize(att.size);
                         links+='<a href="/api/pending/'+e.id+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>';
                     }); links+='</div>'; cell.innerHTML=links;
@@ -1861,7 +1860,7 @@ function openDetailModal(id){
         h+='</div>';
         h+='<div id="bodyHtmlWrap" style="display:none"><iframe class="modal-body-html" id="bodyHtmlFrame" sandbox="allow-same-origin" srcdoc=""></iframe></div>';
         h+='</div>';
-        var atts=(e.attachments||[]).filter(function(a){return !a.is_signature;});
+        var atts=e.attachments||[];
         if(atts.length){
             h+='<div class="modal-field"><div class="modal-field-label">Attachments ('+atts.length+')</div><div class="modal-att-list">';
             atts.forEach(function(a){
@@ -2071,7 +2070,7 @@ function renderProcessedTable(){
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
             '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.department||'')+'</td>'+
-            '<td><span class="'+rc+'">'+rt+'</span></td><td>'+(e.attachment_count||0)+'</td></tr>';
+            '<td><span class="'+rc+'">'+rt+'</span></td><td id="proc-att-'+esc(e.message_id)+'">'+(e.attachment_count||0)+'</td></tr>';
         // Follow-up rows (hidden by default)
         for(var fi=0;fi<fups.length;fi++){
             var fu=fups[fi];
@@ -2105,6 +2104,21 @@ function renderProcessedTable(){
         html+='</div></div>';
     }
     wrap.innerHTML=html;
+    // Fetch attachment links for processed emails
+    items.forEach(function(e){
+        if(e.attachment_count>0 && e.message_id){
+            fetch('/api/processed/'+encodeURIComponent(e.message_id)+'/attachments').then(function(r){return r.json();}).then(function(data){
+                var cell=document.getElementById('proc-att-'+e.message_id);
+                if(!cell||!data.attachments||!data.attachments.length) return;
+                var pid=data.pending_id;
+                var links='<div class="att-list">';
+                data.attachments.forEach(function(att){
+                    var sz=fmtFileSize(att.size);
+                    links+='<a href="/api/pending/'+pid+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>';
+                }); links+='</div>'; cell.innerHTML=links;
+            }).catch(function(){});
+        }
+    });
 }
 
 // ---- Log ----

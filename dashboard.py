@@ -21,8 +21,20 @@ from openpyxl import Workbook
 
 import re
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))   
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = logging.getLogger(__name__)
+
+# Only show document attachments in the UI (filter out images, signatures, etc.)
+DOCUMENT_EXTENSIONS = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                       '.dwg', '.dxf', '.msg', '.zip', '.rar', '.7z', '.csv', '.txt'}
+
+
+def _is_document(filename):
+    """Check if a filename has a document extension."""
+    if not filename:
+        return False
+    ext = os.path.splitext(filename.lower())[1]
+    return ext in DOCUMENT_EXTENSIONS
 
 
 def _summarize_body(body, max_chars=1500):
@@ -941,23 +953,9 @@ def api_pending_detail(pending_id):
         email['sender_company'] = contact['company'] if contact else ''
         email['sender_known'] = contact is not None
 
-        # Get attachment metadata with signature detection
+        # Get attachment metadata — only document files
         attachments = tracker.get_pending_attachments_meta(pending_id)
-        from email_interface.attachment_handler import AttachmentHandler
-        from email_interface.config import load_config, resolve_path
-        email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
-        att_cfg = email_cfg.get('attachments', {})
-        handler = AttachmentHandler(
-            base_path=resolve_path(att_cfg.get('base_path', 'Attachments'), BASE_DIR),
-            max_size_mb=att_cfg.get('max_size_mb', 25),
-            allowed_extensions=att_cfg.get('allowed_extensions'),
-            skip_signature_attachments=att_cfg.get('skip_signature_attachments', True),
-        )
-        for att in attachments:
-            att['is_signature'] = handler.is_signature_attachment(
-                att.get('filename', ''), att.get('content_type', ''), att.get('size')
-            )
-        email['attachments'] = attachments
+        email['attachments'] = [a for a in attachments if _is_document(a.get('filename', ''))]
 
         # Add cleaned body summary
         email['body_summary'] = _summarize_body(email.get('body', ''))
@@ -1113,26 +1111,12 @@ def api_reopen(pending_id):
 
 @app.route('/api/pending/<int:pending_id>/attachments')
 def api_pending_attachments(pending_id):
-    """Return attachment metadata (filenames, sizes) with signature detection."""
+    """Return document attachment metadata (filenames, sizes), excluding images/signatures."""
     tracker = _get_tracker()
     try:
         attachments = tracker.get_pending_attachments_meta(pending_id)
-        # Add signature detection
-        from email_interface.attachment_handler import AttachmentHandler
-        from email_interface.config import load_config, resolve_path
-        email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
-        att_cfg = email_cfg.get('attachments', {})
-        handler = AttachmentHandler(
-            base_path=resolve_path(att_cfg.get('base_path', 'Attachments'), BASE_DIR),
-            max_size_mb=att_cfg.get('max_size_mb', 25),
-            allowed_extensions=att_cfg.get('allowed_extensions'),
-            skip_signature_attachments=att_cfg.get('skip_signature_attachments', True),
-        )
-        for att in attachments:
-            att['is_signature'] = handler.is_signature_attachment(
-                att.get('filename', ''), att.get('content_type', ''), att.get('size')
-            )
-        return jsonify({'attachments': attachments})
+        docs = [a for a in attachments if _is_document(a.get('filename', ''))]
+        return jsonify({'attachments': docs})
     finally:
         tracker.close()
 
@@ -1155,6 +1139,33 @@ def api_pending_attachment_download(pending_id, att_id):
         )
     finally:
         tracker.close()
+
+
+@app.route('/api/processed/<message_id>/attachments')
+def api_processed_attachments(message_id):
+    """Return document attachments for a processed email (via pending_emails link)."""
+    db_path = _get_db_path()
+    if not os.path.exists(db_path):
+        return jsonify({'attachments': []})
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT id FROM pending_emails WHERE message_id = ?", (message_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({'attachments': []})
+        pending_id = row['id']
+        cur = conn.execute(
+            "SELECT id, filename, content_type, size FROM pending_attachments WHERE pending_email_id = ?",
+            (pending_id,),
+        )
+        atts = [dict(r) for r in cur.fetchall() if _is_document(r['filename'])]
+        return jsonify({'attachments': atts, 'pending_id': pending_id})
+    except sqlite3.OperationalError:
+        return jsonify({'attachments': []})
+    finally:
+        conn.close()
 
 
 @app.route('/api/pending/bulk-approve', methods=['POST'])

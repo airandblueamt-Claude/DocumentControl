@@ -24,12 +24,21 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 5
 
 
+DOCUMENT_EXTENSIONS = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                       '.dwg', '.dxf', '.msg', '.zip', '.rar', '.7z', '.csv', '.txt'}
+
+
 def _store_attachments(tracker, pending_id, msg_data):
-    """Store attachment blobs for a pending email."""
+    """Store document attachment blobs for a pending email (skip images/signatures)."""
     for att in msg_data.get('attachments', []):
+        filename = att.get('filename', 'unnamed')
+        ext = os.path.splitext(filename.lower())[1]
+        if ext and ext not in DOCUMENT_EXTENSIONS:
+            logger.debug("Skipping non-document attachment: %s", filename)
+            continue
         tracker.store_pending_attachment(
             pending_id,
-            att.get('filename', 'unnamed'),
+            filename,
             att.get('content_type', 'application/octet-stream'),
             att.get('size', len(att.get('data', b''))),
             att.get('data', b''),

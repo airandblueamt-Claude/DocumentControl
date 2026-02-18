@@ -65,6 +65,7 @@ classifier:
 # Use this when the mailbox only receives forwarded emails from a document control address.
 all_in_scope: true
 
+
 # Scope Keywords - emails matching any of these are considered in-scope
 # (only used when all_in_scope is false)
 scope_keywords:
