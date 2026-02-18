@@ -440,13 +440,7 @@
             max-width: 160px; display: block;
         }
         .att-list a:hover { text-decoration: underline; }
-        .att-list a.att-signature { color: var(--text-light); text-decoration: line-through; }
         .att-size { color: var(--text-light); font-size: 9px; margin-left: 2px; }
-        .tag-signature {
-            background: #fef3c7; color: #92400e;
-            font-size: 9px; font-weight: 600;
-            padding: 1px 5px; border-radius: 4px; margin-left: 3px;
-        }
 
         /* Tags */
         .tag {
@@ -558,7 +552,6 @@
         .modal-att-item { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; }
         .modal-att-item a { color: var(--primary); text-decoration: none; font-weight: 500; word-break: break-all; }
         .modal-att-item a:hover { text-decoration: underline; }
-        .modal-att-item.signature a { color: var(--text-light); text-decoration: line-through; }
         .modal-footer {
             display: flex; gap: 8px;
             padding: 14px 16px; border-top: 1px solid var(--border);
@@ -1735,10 +1728,12 @@ function renderPendingTable() {
                 fetch('/api/pending/'+e.id+'/attachments').then(function(r){return r.json();}).then(function(data){
                     var cell=document.getElementById('att-cell-'+e.id);
                     if(!cell||!data.attachments||!data.attachments.length) return;
+                    var realAtts=data.attachments.filter(function(a){return !a.is_signature;});
+                    if(!realAtts.length) return;
                     var links='<div class="att-list">';
-                    data.attachments.forEach(function(att){
-                        var sz=fmtFileSize(att.size), sc=att.is_signature?' att-signature':'', st=att.is_signature?'<span class="tag-signature">Sig</span>':'';
-                        links+='<a href="/api/pending/'+e.id+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'" class="'+sc+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>'+st;
+                    realAtts.forEach(function(att){
+                        var sz=fmtFileSize(att.size);
+                        links+='<a href="/api/pending/'+e.id+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>';
                     }); links+='</div>'; cell.innerHTML=links;
                 }).catch(function(){});
             }
@@ -1866,12 +1861,11 @@ function openDetailModal(id){
         h+='</div>';
         h+='<div id="bodyHtmlWrap" style="display:none"><iframe class="modal-body-html" id="bodyHtmlFrame" sandbox="allow-same-origin" srcdoc=""></iframe></div>';
         h+='</div>';
-        var atts=e.attachments||[];
+        var atts=(e.attachments||[]).filter(function(a){return !a.is_signature;});
         if(atts.length){
             h+='<div class="modal-field"><div class="modal-field-label">Attachments ('+atts.length+')</div><div class="modal-att-list">';
             atts.forEach(function(a){
-                var sc=a.is_signature?' signature':'', st=a.is_signature?' <span class="tag-signature">Signature</span>':'';
-                h+='<div class="modal-att-item'+sc+'"><a href="/api/pending/'+id+'/attachments/'+a.id+'" target="_blank">'+esc(a.filename)+'</a><span class="att-size">'+fmtFileSize(a.size)+'</span>'+st+'</div>';
+                h+='<div class="modal-att-item"><a href="/api/pending/'+id+'/attachments/'+a.id+'" target="_blank">'+esc(a.filename)+'</a><span class="att-size">'+fmtFileSize(a.size)+'</span></div>';
             }); h+='</div></div>';
         }
         if(e.classifier_method){
@@ -2306,7 +2300,7 @@ function renderAttentionCard(attn){
         var it = items[i];
         var subj = (it.item.subject || '(no subject)');
         if(subj.length > 55) subj = subj.substring(0, 55) + '...';
-        html += '<li class="attn-item" onclick="switchTab(\'review\')" title="' + (it.item.subject||'').replace(/"/g,'&quot;') + '">' +
+        html += '<li class="attn-item" onclick="openDetailModal(' + it.item.id + ')" title="' + (it.item.subject||'').replace(/"/g,'&quot;') + '">' +
             '<span class="attn-dot ' + it.dotClass + '"></span>' +
             '<span>' + subj.replace(/</g,'&lt;') + '</span>' +
             '<span class="attn-label">' + it.label + '</span></li>';

@@ -60,7 +60,13 @@ classifier:
     max_body_chars: 2000
     fallback_on_error: true
 
+# Forwarded Mailbox Mode
+# If true, all incoming emails are treated as in-scope (skip scope detection).
+# Use this when the mailbox only receives forwarded emails from a document control address.
+all_in_scope: true
+
 # Scope Keywords - emails matching any of these are considered in-scope
+# (only used when all_in_scope is false)
 scope_keywords:
   - transmittal
   - submittal

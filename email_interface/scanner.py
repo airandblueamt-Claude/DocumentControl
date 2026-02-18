@@ -101,6 +101,9 @@ def scan_and_queue(base_dir=None, progress_callback=None):
     )
 
     max_messages = email_cfg.get('polling', {}).get('max_messages_per_run', 50)
+    all_in_scope = class_cfg.get('all_in_scope', False)
+    if all_in_scope:
+        logger.info("Forwarded mailbox mode: all emails treated as in-scope")
 
     counts = {'scanned': 0, 'queued': 0, 'skipped': 0, 'out_of_scope': 0,
               'errors': 0, 'auto_assigned': 0, 'inherited': 0, 'total': 0}
@@ -194,6 +197,11 @@ def scan_and_queue(base_dir=None, progress_callback=None):
                 # Combined scope+classify (Feature 1: single API call)
                 result = classifier.classify_full(msg_data)
 
+                # Forwarded mailbox mode: override scope to always in-scope
+                if all_in_scope and not result.in_scope:
+                    logger.info("Overriding out-of-scope (all_in_scope=true): %s", subject)
+                    result.in_scope = True
+
                 if not result.in_scope:
                     logger.info("Out of scope: %s", subject)
                     oos_classification = {
@@ -285,6 +293,8 @@ def scan_all_emails(base_dir=None, progress_callback=None):
         class_cfg, departments=departments, method=method_override,
         custom_instructions=custom_instructions, contacts=contacts,
     )
+
+    all_in_scope = class_cfg.get('all_in_scope', False)
 
     counts = {
         'total': 0, 'scanned': 0, 'queued': 0, 'skipped': 0,
@@ -410,6 +420,10 @@ def scan_all_emails(base_dir=None, progress_callback=None):
                     if result is None:
                         counts['errors'] += 1
                         continue
+
+                    # Forwarded mailbox mode: override scope
+                    if all_in_scope and not result.in_scope:
+                        result.in_scope = True
 
                     if not result.in_scope:
                         oos_classification = {
