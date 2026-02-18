@@ -8,9 +8,42 @@ import json
 import logging
 import os
 import re
+import time
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitError(Exception):
+    """Raised when an API returns a rate-limit (429) response.
+
+    Propagated through the FallbackChainClassifier so it can set a cooldown
+    on the offending classifier and immediately try the next one.
+    """
+    pass
+
+
+def _is_rate_limit_error(exc):
+    """Detect whether an exception is a rate-limit / 429 error.
+
+    Checks exception type names and message text for common patterns across
+    Gemini (google.api_core.exceptions.ResourceExhausted),
+    Groq (groq.RateLimitError), and Anthropic (anthropic.RateLimitError).
+    """
+    # Check class name (works without importing the SDK)
+    cls_name = type(exc).__name__
+    if cls_name in ('RateLimitError', 'ResourceExhausted', 'TooManyRequests'):
+        return True
+    # Check status code attribute (many HTTP SDKs set this)
+    status = getattr(exc, 'status_code', None) or getattr(exc, 'code', None)
+    if status == 429:
+        return True
+    # Check message text
+    msg = str(exc).lower()
+    if any(phrase in msg for phrase in ('429', 'rate limit', 'resource_exhausted',
+                                        'too many requests', 'quota exceeded')):
+        return True
+    return False
 
 # File extensions that indicate document attachments
 DOC_EXTENSIONS = {'.pdf', '.docx', '.xlsx', '.dwg', '.dxf', '.msg', '.zip', '.rar'}
@@ -642,6 +675,8 @@ class ClaudeAPIClassifier(LLMClassifierBase):
             )
             return self._parse_scope_response(resp.content[0].text.strip())
         except (self._anthropic.APIError, json.JSONDecodeError, KeyError, IndexError) as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Claude is_in_scope failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:
                 return self._fallback.is_in_scope(msg_data)
@@ -657,6 +692,8 @@ class ClaudeAPIClassifier(LLMClassifierBase):
             )
             return self._parse_classify_response(resp.content[0].text.strip())
         except (self._anthropic.APIError, json.JSONDecodeError, KeyError, IndexError) as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Claude classify failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:
                 return self._fallback.classify(msg_data)
@@ -672,6 +709,8 @@ class ClaudeAPIClassifier(LLMClassifierBase):
             )
             return self._parse_full_response(resp.content[0].text.strip())
         except (self._anthropic.APIError, json.JSONDecodeError, KeyError, IndexError) as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Claude classify_full failed (%s), falling back", exc)
             if self._fallback_on_error:
                 return self._fallback.classify_full(msg_data)
@@ -687,6 +726,8 @@ class ClaudeAPIClassifier(LLMClassifierBase):
             )
             return self._parse_batch_response(resp.content[0].text.strip(), len(email_list))
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Claude classify_batch failed (%s), falling back to individual", exc)
             return [self.classify_full(msg) for msg in email_list]
 
@@ -761,6 +802,8 @@ class GeminiClassifier(LLMClassifierBase):
             )
             return self._parse_scope_response(self._extract_text(resp))
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Gemini is_in_scope failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:
                 return self._fallback.is_in_scope(msg_data)
@@ -779,6 +822,8 @@ class GeminiClassifier(LLMClassifierBase):
             )
             return self._parse_classify_response(self._extract_text(resp))
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Gemini classify failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:
                 return self._fallback.classify(msg_data)
@@ -797,6 +842,8 @@ class GeminiClassifier(LLMClassifierBase):
             )
             return self._parse_full_response(self._extract_text(resp))
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Gemini classify_full failed (%s), falling back", exc)
             if self._fallback_on_error:
                 return self._fallback.classify_full(msg_data)
@@ -815,6 +862,8 @@ class GeminiClassifier(LLMClassifierBase):
             )
             return self._parse_batch_response(self._extract_text(resp), len(email_list))
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Gemini classify_batch failed (%s), falling back to individual", exc)
             return [self.classify_full(msg) for msg in email_list]
 
@@ -862,6 +911,8 @@ class GroqClassifier(LLMClassifierBase):
             )
             return self._parse_scope_response(resp.choices[0].message.content.strip())
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Groq is_in_scope failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:
                 return self._fallback.is_in_scope(msg_data)
@@ -880,6 +931,8 @@ class GroqClassifier(LLMClassifierBase):
             )
             return self._parse_classify_response(resp.choices[0].message.content.strip())
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Groq classify failed (%s), falling back to rule-based", exc)
             if self._fallback_on_error:
                 return self._fallback.classify(msg_data)
@@ -898,6 +951,8 @@ class GroqClassifier(LLMClassifierBase):
             )
             return self._parse_full_response(resp.choices[0].message.content.strip())
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Groq classify_full failed (%s), falling back", exc)
             if self._fallback_on_error:
                 return self._fallback.classify_full(msg_data)
@@ -916,6 +971,8 @@ class GroqClassifier(LLMClassifierBase):
             )
             return self._parse_batch_response(resp.choices[0].message.content.strip(), len(email_list))
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise RateLimitError(str(exc)) from exc
             logger.warning("Groq classify_batch failed (%s), falling back to individual", exc)
             return [self.classify_full(msg) for msg in email_list]
 
@@ -928,8 +985,12 @@ class FallbackChainClassifier(EmailClassifier):
     """Wraps an ordered list of classifiers, tries each in sequence.
 
     On exception, logs warning and moves to next.
+    On RateLimitError, sets a 60-second cooldown so subsequent calls skip
+    the rate-limited classifier instead of wasting API calls.
     If all fail, defaults to in_scope=True (safer to review than miss).
     """
+
+    RATE_LIMIT_COOLDOWN = 60  # seconds to skip a rate-limited classifier
 
     def __init__(self, classifiers):
         """
@@ -938,56 +999,78 @@ class FallbackChainClassifier(EmailClassifier):
         """
         self._classifiers = classifiers
         self._last_used_name = 'Unknown'
+        # Maps classifier index → time.time() when cooldown expires
+        self._cooldowns = {}
 
     @property
     def name(self):
         return self._last_used_name
 
-    def is_in_scope(self, msg_data):
-        for clf in self._classifiers:
+    def _is_cooled_down(self, idx):
+        """Check if classifier at index is in rate-limit cooldown."""
+        expiry = self._cooldowns.get(idx)
+        if expiry is None:
+            return False
+        if time.time() >= expiry:
+            del self._cooldowns[idx]
+            return False
+        return True
+
+    def _set_cooldown(self, idx, clf):
+        """Set a cooldown on classifier at index after a rate-limit error."""
+        self._cooldowns[idx] = time.time() + self.RATE_LIMIT_COOLDOWN
+        name = getattr(clf, 'name', clf.__class__.__name__)
+        logger.warning("FallbackChain: %s rate-limited, skipping for %ds",
+                        name, self.RATE_LIMIT_COOLDOWN)
+
+    def _try_classifiers(self, method_name, *args, **kwargs):
+        """Generic helper to try each classifier in order with cooldown awareness.
+
+        Returns the result from the first successful classifier.
+        Raises _AllFailed if none succeed.
+        """
+        for idx, clf in enumerate(self._classifiers):
+            if self._is_cooled_down(idx):
+                name = getattr(clf, 'name', clf.__class__.__name__)
+                logger.debug("FallbackChain: skipping %s (rate-limit cooldown)", name)
+                continue
             try:
-                result = clf.is_in_scope(msg_data)
+                method = getattr(clf, method_name)
+                result = method(*args, **kwargs)
                 self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
                 return result
+            except RateLimitError as exc:
+                self._set_cooldown(idx, clf)
             except Exception as exc:
-                logger.warning("FallbackChain: %s.is_in_scope failed (%s), trying next",
-                               clf.__class__.__name__, exc)
+                logger.warning("FallbackChain: %s.%s failed (%s), trying next",
+                               clf.__class__.__name__, method_name, exc)
+        return None  # sentinel — caller handles the "all failed" case
+
+    def is_in_scope(self, msg_data):
+        result = self._try_classifiers('is_in_scope', msg_data)
+        if result is not None:
+            return result
         logger.warning("FallbackChain: all classifiers failed for is_in_scope, defaulting to True")
         return True
 
     def classify(self, msg_data):
-        for clf in self._classifiers:
-            try:
-                result = clf.classify(msg_data)
-                self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
-                return result
-            except Exception as exc:
-                logger.warning("FallbackChain: %s.classify failed (%s), trying next",
-                               clf.__class__.__name__, exc)
+        result = self._try_classifiers('classify', msg_data)
+        if result is not None:
+            return result
         logger.warning("FallbackChain: all classifiers failed for classify, returning defaults")
         return ClassificationResult()
 
     def classify_full(self, msg_data):
-        for clf in self._classifiers:
-            try:
-                result = clf.classify_full(msg_data)
-                self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
-                return result
-            except Exception as exc:
-                logger.warning("FallbackChain: %s.classify_full failed (%s), trying next",
-                               clf.__class__.__name__, exc)
+        result = self._try_classifiers('classify_full', msg_data)
+        if result is not None:
+            return result
         logger.warning("FallbackChain: all classifiers failed for classify_full, returning defaults")
         return ClassificationResult()
 
     def classify_batch(self, email_list):
-        for clf in self._classifiers:
-            try:
-                results = clf.classify_batch(email_list)
-                self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
-                return results
-            except Exception as exc:
-                logger.warning("FallbackChain: %s.classify_batch failed (%s), trying next",
-                               clf.__class__.__name__, exc)
+        result = self._try_classifiers('classify_batch', email_list)
+        if result is not None:
+            return result
         logger.warning("FallbackChain: all classifiers failed for classify_batch, returning defaults")
         return [ClassificationResult() for _ in email_list]
 

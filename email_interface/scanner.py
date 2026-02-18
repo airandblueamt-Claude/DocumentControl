@@ -10,6 +10,7 @@ scan_all_emails()   — full inbox scan: fetches ALL emails, skips already-known
 
 import logging
 import os
+import time
 from datetime import datetime
 
 from email_interface.approval import perform_full_approval
@@ -468,9 +469,11 @@ def scan_all_emails(base_dir=None, progress_callback=None):
                     results = classifier.classify_batch(batch)
             except Exception as exc:
                 logger.error("Batch classify failed: %s", exc, exc_info=True)
-                # Fall back to individual classify_full
+                # Fall back to individual classify_full with throttling
                 results = []
-                for msg in batch:
+                for j, msg in enumerate(batch):
+                    if j > 0:
+                        time.sleep(1)
                     try:
                         results.append(classifier.classify_full(msg))
                     except Exception as e2:

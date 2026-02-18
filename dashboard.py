@@ -1298,7 +1298,12 @@ def api_reclassify():
                 ).fetchall()
                 counts['total'] += len(rows)
 
-                for row in rows:
+                for i, row in enumerate(rows):
+                    # Throttle API calls: 1s between requests to stay within
+                    # free-tier rate limits (Gemini: 10/min, Groq: 30/min)
+                    if i > 0:
+                        time.sleep(1)
+
                     try:
                         msg_data = {
                             'sender': row['sender'] or '',
