@@ -101,6 +101,12 @@ CREATE TABLE IF NOT EXISTS conversations (
     last_date TIMESTAMP,
     created_at TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_emails(status);
+CREATE INDEX IF NOT EXISTS idx_pending_scanned_at ON pending_emails(scanned_at);
+CREATE INDEX IF NOT EXISTS idx_pending_conversation ON pending_emails(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_processed_conversation ON processed_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conv_norm_subject ON conversations(normalized_subject);
 """
 
 # Columns added after initial schema - handled via migration
@@ -382,8 +388,8 @@ class ProcessingTracker:
             try:
                 from dateutil.parser import parse as parse_date
                 email_date = parse_date(pe['email_date'])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Could not parse email_date '%s': %s", pe['email_date'], exc)
         transmittal_no = self.get_next_transmittal_number(email_date)
 
         # Copy to processed_messages (with full classification)
@@ -720,7 +726,7 @@ class ProcessingTracker:
         """Strip RE:/FW:/FWD: prefixes and normalize whitespace."""
         if not subject:
             return ''
-        cleaned = re.sub(r'^(\s*(re|fw|fwd)\s*:\s*)+', '', subject, flags=re.IGNORECASE)
+        cleaned = re.sub(r'^(\s*(?:re|fw|fwd)\s*:\s*)+', '', subject, flags=re.IGNORECASE)
         return ' '.join(cleaned.split()).strip()
 
     def find_or_create_conversation(self, msg_data):

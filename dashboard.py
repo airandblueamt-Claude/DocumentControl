@@ -85,7 +85,14 @@ app = Flask(__name__)
 
 # --- Auth (F1) ---
 DASHBOARD_PASSWORD = os.environ.get('DASHBOARD_PASSWORD', '')
-app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32))
+_secret = os.environ.get('SECRET_KEY')
+if not _secret:
+    logger.warning("SECRET_KEY not set — sessions will reset on app restart. Set SECRET_KEY env var for persistence.")
+    _secret = os.urandom(32)
+app.secret_key = _secret
+
+if not DASHBOARD_PASSWORD:
+    logger.warning("DASHBOARD_PASSWORD not set — dashboard is accessible without authentication.")
 
 
 @app.before_request

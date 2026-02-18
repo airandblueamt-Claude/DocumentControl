@@ -11,7 +11,7 @@ def normalize_subject(subject):
     """Strip RE:/FW:/FWD: prefixes and normalize whitespace."""
     if not subject:
         return ''
-    cleaned = re.sub(r'^(\s*(re|fw|fwd)\s*:\s*)+', '', subject, flags=re.IGNORECASE)
+    cleaned = re.sub(r'^(\s*(?:re|fw|fwd)\s*:\s*)+', '', subject, flags=re.IGNORECASE)
     return ' '.join(cleaned.split()).strip()
 
 
