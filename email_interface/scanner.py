@@ -21,9 +21,49 @@ from email_interface.persistence import ProcessingTracker
 
 logger = logging.getLogger(__name__)
 
+BATCH_SIZE = 5
 
-def scan_and_queue(base_dir=None):
+
+def _store_attachments(tracker, pending_id, msg_data):
+    """Store attachment blobs for a pending email."""
+    for att in msg_data.get('attachments', []):
+        tracker.store_pending_attachment(
+            pending_id,
+            att.get('filename', 'unnamed'),
+            att.get('content_type', 'application/octet-stream'),
+            att.get('size', len(att.get('data', b''))),
+            att.get('data', b''),
+        )
+
+
+def _auto_assign(tracker, msg_data, classification, existing_transmittal):
+    """Auto-assign a follow-up email to its existing transmittal."""
+    message_id = msg_data.get('message_id', '')
+    pending_id = tracker.store_pending_email(
+        msg_data, classification, status='approved')
+    tracker._conn.execute(
+        "UPDATE pending_emails SET transmittal_no = ? WHERE id = ?",
+        (existing_transmittal, pending_id),
+    )
+    tracker.mark_processed(message_id, existing_transmittal, {
+        **msg_data,
+        'doc_type': classification.get('doc_type', ''),
+        'discipline': classification.get('discipline', ''),
+        'department': classification.get('department', ''),
+        'response_required': classification.get('response_required', False),
+        'references': classification.get('references', []),
+    })
+    tracker._conn.commit()
+    _store_attachments(tracker, pending_id, msg_data)
+    return pending_id
+
+
+def scan_and_queue(base_dir=None, progress_callback=None):
     """Fetch unread emails, classify, and store in-scope ones as pending.
+
+    Args:
+        base_dir: Project base directory
+        progress_callback: Optional function(counts, current_subject) for progress updates
 
     Returns: dict with counts {scanned, queued, skipped, out_of_scope, errors}
     """
@@ -62,7 +102,12 @@ def scan_and_queue(base_dir=None):
 
     max_messages = email_cfg.get('polling', {}).get('max_messages_per_run', 50)
 
-    counts = {'scanned': 0, 'queued': 0, 'skipped': 0, 'out_of_scope': 0, 'errors': 0, 'auto_assigned': 0}
+    counts = {'scanned': 0, 'queued': 0, 'skipped': 0, 'out_of_scope': 0,
+              'errors': 0, 'auto_assigned': 0, 'inherited': 0, 'total': 0}
+
+    def _progress(subject='', phase='Scanning'):
+        if progress_callback:
+            progress_callback(counts, subject, phase)
 
     try:
         imap_client.connect()
@@ -75,6 +120,7 @@ def scan_and_queue(base_dir=None):
             return counts
 
         msg_ids = msg_ids[:max_messages]
+        counts['total'] = len(msg_ids)
         logger.info("Scanning up to %d messages", len(msg_ids))
 
         for msg_id in msg_ids:
@@ -83,6 +129,9 @@ def scan_and_queue(base_dir=None):
                 raw_msg = imap_client.fetch_message(msg_id)
                 msg_data = processor.parse_message(raw_msg)
                 message_id = msg_data.get('message_id', '')
+                subject = msg_data.get('subject', '')
+
+                _progress(subject)
 
                 # Skip if already processed or already pending
                 if tracker.is_processed(message_id):
@@ -100,101 +149,92 @@ def scan_and_queue(base_dir=None):
                 # Apply skip filters (noreply, out-of-office, etc.)
                 should_process, reason = processor.should_process(msg_data)
                 if not should_process:
-                    logger.info("Skip filter: %s - %s", msg_data.get('subject', ''), reason)
+                    logger.info("Skip filter: %s - %s", subject, reason)
                     imap_client.mark_as_read(msg_id)
                     counts['skipped'] += 1
                     continue
 
-                # Scope check
-                if not classifier.is_in_scope(msg_data):
-                    logger.info("Out of scope: %s", msg_data.get('subject', ''))
+                # Threading: find or create conversation BEFORE classification
+                conv_id, conv_pos, existing_transmittal = tracker.find_or_create_conversation(msg_data)
+                msg_data['conversation_id'] = conv_id
+                msg_data['conversation_position'] = conv_pos
+
+                # Auto-assign follow-ups if conversation already has a transmittal
+                if existing_transmittal:
+                    classification = {
+                        'doc_type': '', 'discipline': '', 'department': '',
+                        'response_required': False, 'references': [],
+                        'confidence': 1.0, 'summary': f'Follow-up auto-assigned to {existing_transmittal}',
+                        'priority': 'medium',
+                        'classifier_method': 'Auto-assigned',
+                    }
+                    _auto_assign(tracker, msg_data, classification, existing_transmittal)
+                    imap_client.mark_as_read(msg_id)
+                    counts['auto_assigned'] += 1
+                    logger.info("Auto-assigned follow-up to %s: %s - %s",
+                                existing_transmittal, message_id, subject)
+                    _progress(subject)
+                    continue
+
+                # Feature 3: Inherit parent classification for follow-ups
+                if conv_pos > 1:
+                    parent_cls = tracker.get_conversation_classification(conv_id)
+                    if parent_cls:
+                        parent_cls['classifier_method'] = 'Inherited'
+                        pending_id = tracker.store_pending_email(msg_data, parent_cls)
+                        _store_attachments(tracker, pending_id, msg_data)
+                        imap_client.mark_as_read(msg_id)
+                        counts['inherited'] += 1
+                        counts['queued'] += 1
+                        logger.info("Inherited classification for follow-up: %s - %s",
+                                    message_id, subject)
+                        _progress(subject)
+                        continue
+
+                # Combined scope+classify (Feature 1: single API call)
+                result = classifier.classify_full(msg_data)
+
+                if not result.in_scope:
+                    logger.info("Out of scope: %s", subject)
                     oos_classification = {
                         'doc_type': '', 'discipline': '', 'department': '',
                         'response_required': False, 'references': [],
-                        'confidence': None,
+                        'confidence': result.confidence,
+                        'summary': result.summary, 'priority': result.priority,
                         'classifier_method': getattr(classifier, 'name', ''),
                     }
                     tracker.store_pending_email(msg_data, oos_classification, status='out_of_scope')
                     imap_client.mark_as_read(msg_id)
                     counts['out_of_scope'] += 1
+                    _progress(subject)
                     continue
-
-                # Classify
-                result = classifier.classify(msg_data)
-
-                # Threading: find or create conversation
-                conv_id, conv_pos, existing_transmittal = tracker.find_or_create_conversation(msg_data)
-                msg_data['conversation_id'] = conv_id
-                msg_data['conversation_position'] = conv_pos
 
                 classification = result.to_dict()
                 classification['classifier_method'] = getattr(classifier, 'name', '')
 
-                # Auto-assign follow-ups if conversation already has a transmittal
-                if existing_transmittal:
-                    pending_id = tracker.store_pending_email(
-                        msg_data, classification, status='approved')
-                    # Set transmittal on the pending record
-                    tracker._conn.execute(
-                        "UPDATE pending_emails SET transmittal_no = ? WHERE id = ?",
-                        (existing_transmittal, pending_id),
-                    )
-                    # Copy to processed_messages
-                    tracker.mark_processed(message_id, existing_transmittal, {
-                        **msg_data,
-                        'doc_type': classification.get('doc_type', ''),
-                        'discipline': classification.get('discipline', ''),
-                        'department': classification.get('department', ''),
-                        'response_required': classification.get('response_required', False),
-                        'references': classification.get('references', []),
-                    })
-                    tracker._conn.commit()
-
-                    # Store attachment blobs
-                    for att in msg_data.get('attachments', []):
-                        tracker.store_pending_attachment(
-                            pending_id,
-                            att.get('filename', 'unnamed'),
-                            att.get('content_type', 'application/octet-stream'),
-                            att.get('size', len(att.get('data', b''))),
-                            att.get('data', b''),
-                        )
-
-                    imap_client.mark_as_read(msg_id)
-                    counts['auto_assigned'] += 1
-                    logger.info("Auto-assigned follow-up to %s: %s - %s",
-                                existing_transmittal, message_id,
-                                msg_data.get('subject', ''))
-                    continue
-
-                # Store as pending (include classifier metadata)
+                # Store as pending
                 pending_id = tracker.store_pending_email(msg_data, classification)
+                _store_attachments(tracker, pending_id, msg_data)
 
-                # Store attachment blobs
-                for att in msg_data.get('attachments', []):
-                    tracker.store_pending_attachment(
-                        pending_id,
-                        att.get('filename', 'unnamed'),
-                        att.get('content_type', 'application/octet-stream'),
-                        att.get('size', len(att.get('data', b''))),
-                        att.get('data', b''),
-                    )
-
-                # Mark as read in IMAP (don't move to Processed yet)
+                # Mark as read in IMAP
                 imap_client.mark_as_read(msg_id)
                 counts['queued'] += 1
+                _progress(subject)
 
                 logger.info("Queued: %s - %s [%s/%s]",
-                            message_id, msg_data.get('subject', ''),
+                            message_id, subject,
                             result.doc_type, result.discipline)
 
             except Exception as e:
                 logger.error("Failed to scan message %s: %s", msg_id, e, exc_info=True)
                 counts['errors'] += 1
+                _progress('')
 
-        logger.info("Scan complete: %d scanned, %d queued, %d auto-assigned, %d skipped, %d out-of-scope, %d errors",
-                     counts['scanned'], counts['queued'], counts['auto_assigned'],
-                     counts['skipped'], counts['out_of_scope'], counts['errors'])
+        logger.info("Scan complete: %d scanned, %d queued, %d inherited, %d auto-assigned, "
+                     "%d skipped, %d out-of-scope, %d errors",
+                     counts['scanned'], counts['queued'], counts['inherited'],
+                     counts['auto_assigned'], counts['skipped'],
+                     counts['out_of_scope'], counts['errors'])
 
     finally:
         tracker.close()
@@ -203,10 +243,18 @@ def scan_and_queue(base_dir=None):
     return counts
 
 
-def scan_all_emails(base_dir=None):
+def scan_all_emails(base_dir=None, progress_callback=None):
     """Fetch ALL emails in inbox (read and unread), skip already-known ones.
 
-    Use this once to backfill the entire mailbox so no emails are lost.
+    Uses a two-phase approach:
+      Phase 1: Fetch & filter all messages into buckets
+      Phase 2: Store inherited classifications (no API needed)
+      Phase 3: Batch classify remaining emails
+
+    Args:
+        base_dir: Project base directory
+        progress_callback: Optional function(counts, current_subject) for progress updates
+
     Returns: dict with counts
     """
     if base_dir is None:
@@ -240,8 +288,13 @@ def scan_all_emails(base_dir=None):
 
     counts = {
         'total': 0, 'scanned': 0, 'queued': 0, 'skipped': 0,
-        'out_of_scope': 0, 'errors': 0, 'auto_assigned': 0, 'already_known': 0,
+        'out_of_scope': 0, 'errors': 0, 'auto_assigned': 0,
+        'already_known': 0, 'inherited': 0,
     }
+
+    def _progress(subject='', phase=''):
+        if progress_callback:
+            progress_callback(counts, subject, phase)
 
     try:
         imap_client.connect()
@@ -256,12 +309,20 @@ def scan_all_emails(base_dir=None):
 
         logger.info("Full inbox scan: %d total messages", len(msg_ids))
 
+        # Phase 1: Fetch, filter, and bucket
+        needs_classification = []  # list of (msg_data, conv_id, conv_pos)
+
+        _progress('', 'Fetching emails')
+
         for msg_id in msg_ids:
             counts['scanned'] += 1
             try:
                 raw_msg = imap_client.fetch_message(msg_id)
                 msg_data = processor.parse_message(raw_msg)
                 message_id = msg_data.get('message_id', '')
+                subject = msg_data.get('subject', '')
+
+                _progress(subject, 'Fetching emails')
 
                 # Skip if already in our database
                 if tracker.is_processed(message_id) or tracker.is_pending(message_id):
@@ -274,94 +335,119 @@ def scan_all_emails(base_dir=None):
                     counts['skipped'] += 1
                     continue
 
-                # Scope check
-                if not classifier.is_in_scope(msg_data):
-                    oos_classification = {
-                        'doc_type': '', 'discipline': '', 'department': '',
-                        'response_required': False, 'references': [],
-                        'confidence': None,
-                        'classifier_method': getattr(classifier, 'name', ''),
-                    }
-                    tracker.store_pending_email(msg_data, oos_classification, status='out_of_scope')
-                    counts['out_of_scope'] += 1
-                    continue
-
-                # Classify
-                result = classifier.classify(msg_data)
-
-                # Threading
+                # Threading: find or create conversation BEFORE classification
                 conv_id, conv_pos, existing_transmittal = tracker.find_or_create_conversation(msg_data)
                 msg_data['conversation_id'] = conv_id
                 msg_data['conversation_position'] = conv_pos
 
-                classification = result.to_dict()
-                classification['classifier_method'] = getattr(classifier, 'name', '')
-
-                # Auto-assign follow-ups
+                # Bucket 1: Auto-assign follow-ups with existing transmittal
                 if existing_transmittal:
-                    pending_id = tracker.store_pending_email(
-                        msg_data, classification, status='approved')
-                    tracker._conn.execute(
-                        "UPDATE pending_emails SET transmittal_no = ? WHERE id = ?",
-                        (existing_transmittal, pending_id),
-                    )
-                    tracker.mark_processed(message_id, existing_transmittal, {
-                        **msg_data,
-                        'doc_type': classification.get('doc_type', ''),
-                        'discipline': classification.get('discipline', ''),
-                        'department': classification.get('department', ''),
-                        'response_required': classification.get('response_required', False),
-                        'references': classification.get('references', []),
-                    })
-                    tracker._conn.commit()
-
-                    for att in msg_data.get('attachments', []):
-                        tracker.store_pending_attachment(
-                            pending_id,
-                            att.get('filename', 'unnamed'),
-                            att.get('content_type', 'application/octet-stream'),
-                            att.get('size', len(att.get('data', b''))),
-                            att.get('data', b''),
-                        )
-
+                    classification = {
+                        'doc_type': '', 'discipline': '', 'department': '',
+                        'response_required': False, 'references': [],
+                        'confidence': 1.0, 'summary': f'Follow-up auto-assigned to {existing_transmittal}',
+                        'priority': 'medium',
+                        'classifier_method': 'Auto-assigned',
+                    }
+                    _auto_assign(tracker, msg_data, classification, existing_transmittal)
                     counts['auto_assigned'] += 1
                     logger.info("Auto-assigned follow-up to %s: %s",
-                                existing_transmittal, msg_data.get('subject', ''))
+                                existing_transmittal, subject)
                     continue
 
-                # Store as pending
-                pending_id = tracker.store_pending_email(msg_data, classification)
+                # Bucket 2: Inherit parent classification for follow-ups
+                if conv_pos > 1:
+                    parent_cls = tracker.get_conversation_classification(conv_id)
+                    if parent_cls:
+                        parent_cls['classifier_method'] = 'Inherited'
+                        pending_id = tracker.store_pending_email(msg_data, parent_cls)
+                        _store_attachments(tracker, pending_id, msg_data)
+                        counts['inherited'] += 1
+                        counts['queued'] += 1
+                        logger.info("Inherited classification for follow-up: %s", subject)
+                        continue
 
-                for att in msg_data.get('attachments', []):
-                    tracker.store_pending_attachment(
-                        pending_id,
-                        att.get('filename', 'unnamed'),
-                        att.get('content_type', 'application/octet-stream'),
-                        att.get('size', len(att.get('data', b''))),
-                        att.get('data', b''),
-                    )
-
-                counts['queued'] += 1
-                logger.info("Queued: %s - %s [%s/%s]",
-                            message_id, msg_data.get('subject', ''),
-                            result.doc_type, result.discipline)
+                # Bucket 3: Needs AI classification
+                needs_classification.append(msg_data)
 
             except Exception as e:
-                logger.error("Failed to scan message %s: %s", msg_id, e, exc_info=True)
+                logger.error("Failed to fetch message %s: %s", msg_id, e, exc_info=True)
                 counts['errors'] += 1
 
             # Log progress every 25 messages
             if counts['scanned'] % 25 == 0:
-                logger.info("Progress: %d/%d scanned, %d queued, %d already known",
-                            counts['scanned'], counts['total'],
-                            counts['queued'], counts['already_known'])
+                logger.info("Phase 1 progress: %d/%d fetched, %d need classification",
+                            counts['scanned'], counts['total'], len(needs_classification))
+
+        # Phase 3: Batch classify remaining emails
+        logger.info("Phase 3: Batch classifying %d emails in batches of %d",
+                     len(needs_classification), BATCH_SIZE)
+        _progress('', 'Classifying emails')
+
+        for batch_start in range(0, len(needs_classification), BATCH_SIZE):
+            batch = needs_classification[batch_start:batch_start + BATCH_SIZE]
+            batch_subjects = [m.get('subject', '')[:50] for m in batch]
+            _progress(', '.join(batch_subjects), 'Classifying emails')
+
+            try:
+                if len(batch) == 1:
+                    results = [classifier.classify_full(batch[0])]
+                else:
+                    results = classifier.classify_batch(batch)
+            except Exception as exc:
+                logger.error("Batch classify failed: %s", exc, exc_info=True)
+                # Fall back to individual classify_full
+                results = []
+                for msg in batch:
+                    try:
+                        results.append(classifier.classify_full(msg))
+                    except Exception as e2:
+                        logger.error("Individual classify_full also failed: %s", e2)
+                        results.append(None)
+
+            for msg_data, result in zip(batch, results):
+                try:
+                    if result is None:
+                        counts['errors'] += 1
+                        continue
+
+                    if not result.in_scope:
+                        oos_classification = {
+                            'doc_type': '', 'discipline': '', 'department': '',
+                            'response_required': False, 'references': [],
+                            'confidence': result.confidence,
+                            'summary': result.summary, 'priority': result.priority,
+                            'classifier_method': getattr(classifier, 'name', ''),
+                        }
+                        tracker.store_pending_email(msg_data, oos_classification, status='out_of_scope')
+                        counts['out_of_scope'] += 1
+                        continue
+
+                    classification = result.to_dict()
+                    classification['classifier_method'] = getattr(classifier, 'name', '')
+
+                    pending_id = tracker.store_pending_email(msg_data, classification)
+                    _store_attachments(tracker, pending_id, msg_data)
+                    counts['queued'] += 1
+
+                    logger.info("Queued: %s [%s/%s]",
+                                msg_data.get('subject', ''),
+                                result.doc_type, result.discipline)
+                except Exception as e:
+                    logger.error("Failed to store classified email: %s", e, exc_info=True)
+                    counts['errors'] += 1
+
+            logger.info("Batch %d-%d complete: %d/%d classified",
+                        batch_start + 1, min(batch_start + BATCH_SIZE, len(needs_classification)),
+                        counts['queued'] + counts['out_of_scope'],
+                        len(needs_classification))
 
         logger.info(
-            "Full scan complete: %d total, %d new queued, %d auto-assigned, "
+            "Full scan complete: %d total, %d new queued, %d inherited, %d auto-assigned, "
             "%d already known, %d skipped, %d out-of-scope, %d errors",
-            counts['total'], counts['queued'], counts['auto_assigned'],
-            counts['already_known'], counts['skipped'],
-            counts['out_of_scope'], counts['errors'],
+            counts['total'], counts['queued'], counts['inherited'],
+            counts['auto_assigned'], counts['already_known'],
+            counts['skipped'], counts['out_of_scope'], counts['errors'],
         )
 
     finally:

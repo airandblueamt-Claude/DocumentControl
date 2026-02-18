@@ -120,6 +120,8 @@ _MIGRATIONS = [
     ("pending_emails", "conversation_id", "INTEGER"),
     ("pending_emails", "conversation_position", "INTEGER DEFAULT 1"),
     ("processed_messages", "conversation_id", "INTEGER"),
+    ("pending_emails", "ai_summary", "TEXT"),
+    ("pending_emails", "ai_priority", "TEXT DEFAULT 'medium'"),
 ]
 
 
@@ -243,8 +245,9 @@ class ProcessingTracker:
                 doc_type, discipline, department, response_required,
                 references_json, attachment_count, classifier_method, confidence,
                 body_html, in_reply_to, email_references,
-                conversation_id, conversation_position)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                conversation_id, conversation_position,
+                ai_summary, ai_priority)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_data.get('message_id', ''),
                 status,
@@ -269,6 +272,8 @@ class ProcessingTracker:
                 msg_data.get('email_references', ''),
                 msg_data.get('conversation_id'),
                 msg_data.get('conversation_position', 1),
+                classification.get('summary', ''),
+                classification.get('priority', 'medium'),
             ),
         )
         self._conn.commit()
@@ -295,7 +300,8 @@ class ProcessingTracker:
                       doc_type, discipline, department, response_required,
                       references_json, attachment_count, transmittal_no,
                       classifier_method, confidence,
-                      conversation_id, conversation_position
+                      conversation_id, conversation_position,
+                      ai_summary, ai_priority
                FROM pending_emails WHERE status = ?
                ORDER BY scanned_at DESC LIMIT ?""",
             (status, limit),
@@ -818,6 +824,36 @@ class ProcessingTracker:
         transmittal = row['transmittal_no'] if row else None
 
         return (conv_id, position, transmittal)
+
+    def get_conversation_classification(self, conversation_id):
+        """Get classification from the first classified email in a conversation.
+
+        Returns: dict with classification fields, or None if no classified email found.
+        """
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            """SELECT doc_type, discipline, department, response_required,
+                      references_json, confidence, ai_summary, ai_priority
+               FROM pending_emails
+               WHERE conversation_id = ? AND status IN ('pending_review', 'approved')
+                     AND doc_type IS NOT NULL AND doc_type != ''
+               ORDER BY conversation_position ASC LIMIT 1""",
+            (conversation_id,),
+        )
+        row = cur.fetchone()
+        self._conn.row_factory = None
+        if not row:
+            return None
+        return {
+            'doc_type': row['doc_type'],
+            'discipline': row['discipline'],
+            'department': row['department'],
+            'response_required': row['response_required'],
+            'references': json.loads(row['references_json'] or '[]'),
+            'confidence': row['confidence'],
+            'summary': row['ai_summary'] or '',
+            'priority': row['ai_priority'] or 'medium',
+        }
 
     def get_conversation(self, conversation_id):
         """Return a conversation row as dict."""

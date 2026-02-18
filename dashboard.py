@@ -110,6 +110,15 @@ scan_state = {
     'classifiers_used': [],   # F2: track which classifiers were used in last scan
 }
 
+# --- Scan progress (real-time progress for UI) ---
+scan_progress = {
+    'active': False, 'total': 0, 'scanned': 0,
+    'queued': 0, 'skipped': 0, 'out_of_scope': 0,
+    'errors': 0, 'auto_assigned': 0, 'inherited': 0,
+    'already_known': 0,
+    'current_subject': '', 'phase': '',
+}
+
 # --- Logging setup (run once) ---
 _logging_initialized = False
 
@@ -190,6 +199,38 @@ def _ensure_backfill():
         logger.error("Backfill error: %s", e)
 
 
+def _reset_scan_progress():
+    """Reset scan progress dict for a new scan."""
+    scan_progress['active'] = True
+    scan_progress['total'] = 0
+    scan_progress['scanned'] = 0
+    scan_progress['queued'] = 0
+    scan_progress['skipped'] = 0
+    scan_progress['out_of_scope'] = 0
+    scan_progress['errors'] = 0
+    scan_progress['auto_assigned'] = 0
+    scan_progress['inherited'] = 0
+    scan_progress['already_known'] = 0
+    scan_progress['current_subject'] = ''
+    scan_progress['phase'] = ''
+
+
+def _scan_progress_callback(counts, subject, phase=''):
+    """Callback from scanner to update real-time progress."""
+    scan_progress['scanned'] = counts.get('scanned', 0)
+    scan_progress['total'] = counts.get('total', 0)
+    scan_progress['queued'] = counts.get('queued', 0)
+    scan_progress['skipped'] = counts.get('skipped', 0)
+    scan_progress['out_of_scope'] = counts.get('out_of_scope', 0)
+    scan_progress['errors'] = counts.get('errors', 0)
+    scan_progress['auto_assigned'] = counts.get('auto_assigned', 0)
+    scan_progress['inherited'] = counts.get('inherited', 0)
+    scan_progress['already_known'] = counts.get('already_known', 0)
+    scan_progress['current_subject'] = subject or ''
+    if phase:
+        scan_progress['phase'] = phase
+
+
 def run_scan():
     """Execute a scan via scan_and_queue(), tracking state."""
     if not scan_lock.acquire(blocking=False):
@@ -197,6 +238,7 @@ def run_scan():
 
     try:
         scan_state['status'] = 'scanning'
+        _reset_scan_progress()
         _ensure_logging()
         logger = logging.getLogger(__name__)
 
@@ -205,7 +247,7 @@ def run_scan():
 
         logger.info("Dashboard: starting scan (scan_and_queue)")
         from email_interface.scanner import scan_and_queue
-        counts = scan_and_queue(base_dir=BASE_DIR)
+        counts = scan_and_queue(base_dir=BASE_DIR, progress_callback=_scan_progress_callback)
 
         # F2: Check classifier methods used by recently scanned emails
         classifiers_used = []
@@ -228,12 +270,14 @@ def run_scan():
         scan_state['status'] = 'idle'
         scan_state['last_scan_time'] = datetime.now().isoformat()
         auto_str = f", {counts['auto_assigned']} auto-assigned" if counts.get('auto_assigned') else ''
+        inherited_str = f", {counts['inherited']} inherited" if counts.get('inherited') else ''
         scan_state['last_scan_result'] = (
-            f"{counts['queued']} queued{auto_str}, {counts['out_of_scope']} out-of-scope, "
-            f"{counts['skipped']} skipped"
+            f"{counts['queued']} queued{auto_str}{inherited_str}, "
+            f"{counts['out_of_scope']} out-of-scope, {counts['skipped']} skipped"
         )
         scan_state['last_scan_ok'] = counts['errors'] == 0
         scan_state['classifiers_used'] = classifiers_used
+        scan_progress['active'] = False
         logger.info("Dashboard: scan complete - %s", scan_state['last_scan_result'])
 
     except Exception as e:
@@ -241,6 +285,7 @@ def run_scan():
         scan_state['last_scan_time'] = datetime.now().isoformat()
         scan_state['last_scan_result'] = str(e)
         scan_state['last_scan_ok'] = False
+        scan_progress['active'] = False
         logging.getLogger(__name__).error("Dashboard: scan failed - %s", e, exc_info=True)
     finally:
         scan_lock.release()
@@ -434,6 +479,12 @@ def api_home_stats():
     })
 
 
+@app.route('/api/scan-progress')
+def api_scan_progress():
+    """Return real-time scan progress for the UI progress bar."""
+    return jsonify(scan_progress)
+
+
 @app.route('/api/scan', methods=['POST'])
 def api_scan():
     if scan_state['status'] == 'scanning':
@@ -454,26 +505,30 @@ def api_scan_all():
             return
         try:
             scan_state['status'] = 'scanning'
+            _reset_scan_progress()
             _ensure_logging()
             _ensure_backfill()
             logger.info("Dashboard: starting FULL inbox scan")
             from email_interface.scanner import scan_all_emails
-            counts = scan_all_emails(base_dir=BASE_DIR)
+            counts = scan_all_emails(base_dir=BASE_DIR, progress_callback=_scan_progress_callback)
             auto_str = f", {counts['auto_assigned']} auto-assigned" if counts.get('auto_assigned') else ''
+            inherited_str = f", {counts['inherited']} inherited" if counts.get('inherited') else ''
             scan_state['status'] = 'idle'
             scan_state['last_scan_time'] = datetime.now().isoformat()
             scan_state['last_scan_result'] = (
-                f"FULL SCAN: {counts['total']} total, {counts['queued']} queued{auto_str}, "
+                f"FULL SCAN: {counts['total']} total, {counts['queued']} queued{auto_str}{inherited_str}, "
                 f"{counts['already_known']} already known, "
                 f"{counts['out_of_scope']} out-of-scope, {counts['skipped']} skipped"
             )
             scan_state['last_scan_ok'] = counts['errors'] == 0
+            scan_progress['active'] = False
             logger.info("Dashboard: full scan complete - %s", scan_state['last_scan_result'])
         except Exception as e:
             scan_state['status'] = 'error'
             scan_state['last_scan_time'] = datetime.now().isoformat()
             scan_state['last_scan_result'] = f"Full scan error: {e}"
             scan_state['last_scan_ok'] = False
+            scan_progress['active'] = False
             logger.error("Dashboard: full scan failed - %s", e, exc_info=True)
         finally:
             scan_lock.release()
@@ -997,36 +1052,39 @@ def api_reclassify():
                             'attachments': [],  # no blobs needed for classification
                         }
 
-                        # Re-check scope
-                        in_scope = classifier.is_in_scope(msg_data)
+                        # Combined scope+classify (single API call)
+                        result = classifier.classify_full(msg_data)
 
-                        if not in_scope and row['status'] == 'pending_review':
+                        if not result.in_scope and row['status'] == 'pending_review':
                             # Was in review, now out of scope
                             conn.execute(
                                 "UPDATE pending_emails SET status = 'out_of_scope', "
                                 "doc_type = '', discipline = '', department = '', "
+                                "ai_summary = ?, ai_priority = ?, "
                                 "classifier_method = ? WHERE id = ?",
-                                (getattr(classifier, 'name', ''), row['id']),
+                                (result.summary, result.priority,
+                                 getattr(classifier, 'name', ''), row['id']),
                             )
                             counts['moved_to_out_of_scope'] += 1
                             rlogger.info("Re-classify: moved to out_of_scope: [%d] %s",
                                          row['id'], row['subject'])
                             continue
 
-                        if in_scope and row['status'] == 'out_of_scope':
+                        if result.in_scope and row['status'] == 'out_of_scope':
                             # Was out of scope, now in scope — move to review
-                            result = classifier.classify(msg_data)
                             conn.execute(
                                 """UPDATE pending_emails SET status = 'pending_review',
                                    doc_type = ?, discipline = ?, department = ?,
                                    response_required = ?, references_json = ?,
-                                   confidence = ?, classifier_method = ?
+                                   confidence = ?, classifier_method = ?,
+                                   ai_summary = ?, ai_priority = ?
                                    WHERE id = ?""",
                                 (result.doc_type, result.discipline, result.department,
                                  int(result.response_required),
                                  json.dumps(result.references),
                                  result.confidence,
                                  getattr(classifier, 'name', ''),
+                                 result.summary, result.priority,
                                  row['id']),
                             )
                             counts['moved_to_review'] += 1
@@ -1034,9 +1092,8 @@ def api_reclassify():
                                          row['id'], row['subject'])
                             continue
 
-                        if in_scope and row['status'] == 'pending_review':
+                        if result.in_scope and row['status'] == 'pending_review':
                             # Still in scope — re-classify to update department/type/etc
-                            result = classifier.classify(msg_data)
                             old_dept = row['department'] or ''
                             new_dept = result.department or ''
                             changed = (
@@ -1049,13 +1106,15 @@ def api_reclassify():
                                     """UPDATE pending_emails SET
                                        doc_type = ?, discipline = ?, department = ?,
                                        response_required = ?, references_json = ?,
-                                       confidence = ?, classifier_method = ?
+                                       confidence = ?, classifier_method = ?,
+                                       ai_summary = ?, ai_priority = ?
                                        WHERE id = ?""",
                                     (result.doc_type, result.discipline, result.department,
                                      int(result.response_required),
                                      json.dumps(result.references),
                                      result.confidence,
                                      getattr(classifier, 'name', ''),
+                                     result.summary, result.priority,
                                      row['id']),
                                 )
                                 counts['dept_updated'] += 1

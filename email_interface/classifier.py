@@ -22,11 +22,12 @@ class ClassificationResult:
     __slots__ = (
         'in_scope', 'doc_type', 'discipline', 'department',
         'response_required', 'references', 'confidence',
+        'summary', 'priority',
     )
 
     def __init__(self, in_scope=True, doc_type='Others', discipline='General',
                  department='', response_required=False, references=None,
-                 confidence=1.0):
+                 confidence=1.0, summary='', priority='medium'):
         self.in_scope = in_scope
         self.doc_type = doc_type
         self.discipline = discipline
@@ -34,6 +35,8 @@ class ClassificationResult:
         self.response_required = response_required
         self.references = references or []
         self.confidence = confidence
+        self.summary = summary
+        self.priority = priority
 
     def to_dict(self):
         return {
@@ -44,6 +47,8 @@ class ClassificationResult:
             'response_required': self.response_required,
             'references': self.references,
             'confidence': self.confidence,
+            'summary': self.summary,
+            'priority': self.priority,
         }
 
 
@@ -57,6 +62,19 @@ class EmailClassifier(ABC):
     @abstractmethod
     def classify(self, msg_data):
         """Return a ClassificationResult for the given email."""
+
+    def classify_full(self, msg_data):
+        """Combined scope + classify in one call. Default calls both separately.
+        LLM subclasses override to use a single API call."""
+        if not self.is_in_scope(msg_data):
+            return ClassificationResult(
+                in_scope=False, summary='Out of scope', priority='low', confidence=0.0)
+        result = self.classify(msg_data)
+        return result
+
+    def classify_batch(self, email_list):
+        """Classify multiple emails. Default falls back to individual classify_full() calls."""
+        return [self.classify_full(msg) for msg in email_list]
 
 
 class RuleBasedClassifier(EmailClassifier):
@@ -214,6 +232,19 @@ class RuleBasedClassifier(EmailClassifier):
             confidence=1.0,
         )
 
+    def classify_full(self, msg_data):
+        """Combined scope + classify for rule-based. Generates a simple summary."""
+        if not self.is_in_scope(msg_data):
+            return ClassificationResult(
+                in_scope=False, summary='Out of scope', priority='low', confidence=0.0)
+        result = self.classify(msg_data)
+        # Generate simple summary from sender + subject
+        sender = msg_data.get('sender_name') or msg_data.get('sender', '')
+        subject = msg_data.get('subject', '')
+        result.summary = f"{sender}: {subject}" if sender else subject
+        result.priority = 'medium'
+        return result
+
 
 # ---------------------------------------------------------------------------
 # LLM Base Class
@@ -306,25 +337,6 @@ class LLMClassifierBase(EmailClassifier):
         doc_types = list(self._type_keywords.keys())
         disciplines = list(self._discipline_keywords.keys())
 
-        # Build department descriptions
-        dept_lines = []
-        for dept in self._dept_list:
-            name = dept['name']
-            desc = dept.get('description', '') or ''
-            if not desc:
-                # Fall back to keywords list
-                kw_raw = dept.get('keywords', '[]')
-                if isinstance(kw_raw, str):
-                    try:
-                        kws = json.loads(kw_raw)
-                    except (ValueError, TypeError):
-                        kws = []
-                else:
-                    kws = kw_raw
-                desc = ', '.join(kws) if kws else ''
-            dept_lines.append(f"- {name}: {desc}" if desc else f"- {name}")
-        dept_block = '\n'.join(dept_lines) if dept_lines else 'none'
-
         prompt = (
             "You are a document control classifier for a construction/engineering company.\n"
             "Classify the following email.\n\n"
@@ -337,29 +349,12 @@ class LLMClassifierBase(EmailClassifier):
                 "--- END CUSTOM INSTRUCTIONS ---\n\n"
             )
 
-        # Add known contacts with department mapping
-        if self._contacts:
-            contact_lines = []
-            for c in self._contacts:
-                email = c.get('email', '')
-                name = c.get('name', '')
-                dept = c.get('department', '')
-                company = c.get('company', '')
-                line = f"- {email} → {name}"
-                if company:
-                    line += f" ({company})"
-                if dept:
-                    line += f" → Department: {dept}"
-                contact_lines.append(line)
-            prompt += (
-                "Known contacts (use these to determine department):\n"
-                + '\n'.join(contact_lines) + "\n\n"
-            )
+        prompt += self._build_contacts_block()
 
         prompt += (
             f"Valid document types: {', '.join(doc_types)}\n"
             f"Valid disciplines: {', '.join(disciplines)}\n\n"
-            f"Departments:\n{dept_block}\n\n"
+            f"Departments:\n{self._build_dept_block()}\n\n"
             "Reply with ONLY valid JSON:\n"
             "{\n"
             '  "doc_type": "one of the valid types above",\n'
@@ -371,6 +366,220 @@ class LLMClassifierBase(EmailClassifier):
             "}"
         )
         return prompt
+
+    def _build_dept_block(self):
+        """Build department descriptions block for prompts."""
+        dept_lines = []
+        for dept in self._dept_list:
+            name = dept['name']
+            desc = dept.get('description', '') or ''
+            if not desc:
+                kw_raw = dept.get('keywords', '[]')
+                if isinstance(kw_raw, str):
+                    try:
+                        kws = json.loads(kw_raw)
+                    except (ValueError, TypeError):
+                        kws = []
+                else:
+                    kws = kw_raw
+                desc = ', '.join(kws) if kws else ''
+            dept_lines.append(f"- {name}: {desc}" if desc else f"- {name}")
+        return '\n'.join(dept_lines) if dept_lines else 'none'
+
+    def _build_contacts_block(self):
+        """Build contacts block for prompts."""
+        if not self._contacts:
+            return ''
+        contact_lines = []
+        for c in self._contacts:
+            email = c.get('email', '')
+            name = c.get('name', '')
+            dept = c.get('department', '')
+            company = c.get('company', '')
+            line = f"- {email} → {name}"
+            if company:
+                line += f" ({company})"
+            if dept:
+                line += f" → Department: {dept}"
+            contact_lines.append(line)
+        return (
+            "Known contacts (use these to determine department):\n"
+            + '\n'.join(contact_lines) + "\n\n"
+        )
+
+    def _build_full_system_prompt(self):
+        """Combined scope + classify prompt for a single API call."""
+        doc_types = list(self._type_keywords.keys())
+        disciplines = list(self._discipline_keywords.keys())
+
+        prompt = (
+            "You are a document control assistant for a construction/engineering company.\n"
+            "Determine if the following email is in scope (related to document control, "
+            "construction project management, or engineering correspondence), "
+            "and if so, classify it.\n\n"
+            f"Scope keywords for reference: {', '.join(self._scope_keywords)}\n\n"
+        )
+
+        if self._custom_instructions:
+            prompt += (
+                "--- CUSTOM INSTRUCTIONS ---\n"
+                f"{self._custom_instructions}\n"
+                "--- END CUSTOM INSTRUCTIONS ---\n\n"
+            )
+
+        # Known contacts
+        if self._contacts:
+            scope_contacts = [f"- {c.get('email', '')} ({c.get('name', '')}, {c.get('company', '')})"
+                              for c in self._contacts if c.get('email')]
+            prompt += (
+                "Known project contacts (emails from these senders are ALWAYS in scope):\n"
+                + '\n'.join(scope_contacts) + "\n\n"
+            )
+
+        prompt += self._build_contacts_block()
+
+        prompt += (
+            f"Valid document types: {', '.join(doc_types)}\n"
+            f"Valid disciplines: {', '.join(disciplines)}\n\n"
+            f"Departments:\n{self._build_dept_block()}\n\n"
+            "Reply with ONLY valid JSON:\n"
+            "{\n"
+            '  "in_scope": true or false,\n'
+            '  "doc_type": "one of the valid types above (or empty if out of scope)",\n'
+            '  "discipline": "one of the valid disciplines above (or empty if out of scope)",\n'
+            '  "department": "one of the valid departments above or empty string",\n'
+            '  "response_required": true or false,\n'
+            '  "references": ["any reference numbers found"],\n'
+            '  "confidence": 0.0 to 1.0,\n'
+            '  "summary": "1-2 sentence summary of what this email is about",\n'
+            '  "priority": "high" or "medium" or "low"\n'
+            "}"
+        )
+        return prompt
+
+    def _parse_full_response(self, text):
+        """Parse combined scope+classify JSON response into ClassificationResult."""
+        data = json.loads(text)
+        in_scope = bool(data.get('in_scope', True))
+        logger.info("LLM classify_full → in_scope=%s, type=%s, dept=%s, conf=%.2f, priority=%s",
+                     in_scope, data.get('doc_type'), data.get('department'),
+                     data.get('confidence', 0), data.get('priority', 'medium'))
+        return ClassificationResult(
+            in_scope=in_scope,
+            doc_type=data.get('doc_type', 'Others') if in_scope else '',
+            discipline=data.get('discipline', 'General') if in_scope else '',
+            department=data.get('department', ''),
+            response_required=bool(data.get('response_required', False)),
+            references=data.get('references', []),
+            confidence=float(data.get('confidence', 0.8)),
+            summary=data.get('summary', ''),
+            priority=data.get('priority', 'medium'),
+        )
+
+    def _full_json_schema(self):
+        """JSON schema for Gemini structured output (combined scope+classify)."""
+        doc_types = list(self._type_keywords.keys())
+        disciplines = list(self._discipline_keywords.keys())
+        return {
+            "type": "object",
+            "properties": {
+                "in_scope": {"type": "boolean"},
+                "doc_type": {"type": "string", "enum": doc_types + ['']},
+                "discipline": {"type": "string", "enum": disciplines + ['']},
+                "department": {"type": "string"},
+                "response_required": {"type": "boolean"},
+                "references": {"type": "array", "items": {"type": "string"}},
+                "confidence": {"type": "number"},
+                "summary": {"type": "string"},
+                "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+            },
+            "required": ["in_scope", "doc_type", "discipline", "department",
+                         "response_required", "references", "confidence",
+                         "summary", "priority"],
+        }
+
+    def _build_batch_system_prompt(self, count):
+        """Prompt for classifying N emails in one API call."""
+        doc_types = list(self._type_keywords.keys())
+        disciplines = list(self._discipline_keywords.keys())
+
+        prompt = (
+            "You are a document control assistant for a construction/engineering company.\n"
+            f"You will receive {count} emails below. For EACH email, determine if it is in scope "
+            "and classify it.\n\n"
+            f"Scope keywords for reference: {', '.join(self._scope_keywords)}\n\n"
+        )
+
+        if self._custom_instructions:
+            prompt += (
+                "--- CUSTOM INSTRUCTIONS ---\n"
+                f"{self._custom_instructions}\n"
+                "--- END CUSTOM INSTRUCTIONS ---\n\n"
+            )
+
+        if self._contacts:
+            scope_contacts = [f"- {c.get('email', '')} ({c.get('name', '')}, {c.get('company', '')})"
+                              for c in self._contacts if c.get('email')]
+            prompt += (
+                "Known project contacts (emails from these senders are ALWAYS in scope):\n"
+                + '\n'.join(scope_contacts) + "\n\n"
+            )
+
+        prompt += self._build_contacts_block()
+
+        prompt += (
+            f"Valid document types: {', '.join(doc_types)}\n"
+            f"Valid disciplines: {', '.join(disciplines)}\n\n"
+            f"Departments:\n{self._build_dept_block()}\n\n"
+            f"Reply with ONLY a valid JSON ARRAY of exactly {count} objects, one per email in order:\n"
+            "[\n"
+            "  {\n"
+            '    "in_scope": true or false,\n'
+            '    "doc_type": "...", "discipline": "...", "department": "...",\n'
+            '    "response_required": true or false,\n'
+            '    "references": ["..."],\n'
+            '    "confidence": 0.0 to 1.0,\n'
+            '    "summary": "1-2 sentence summary",\n'
+            '    "priority": "high" or "medium" or "low"\n'
+            "  },\n"
+            "  ...\n"
+            "]"
+        )
+        return prompt
+
+    def _build_batch_user_prompt(self, email_list):
+        """Format N emails for batch classification."""
+        parts = []
+        for i, msg in enumerate(email_list, 1):
+            parts.append(f"--- EMAIL {i} ---")
+            parts.append(self._email_summary(msg))
+        return '\n\n'.join(parts)
+
+    def _parse_batch_response(self, text, count):
+        """Parse JSON array of classifications, pad/trim to expected count."""
+        data = json.loads(text)
+        if not isinstance(data, list):
+            raise ValueError("Expected JSON array for batch response")
+        results = []
+        for item in data[:count]:
+            in_scope = bool(item.get('in_scope', True))
+            results.append(ClassificationResult(
+                in_scope=in_scope,
+                doc_type=item.get('doc_type', 'Others') if in_scope else '',
+                discipline=item.get('discipline', 'General') if in_scope else '',
+                department=item.get('department', ''),
+                response_required=bool(item.get('response_required', False)),
+                references=item.get('references', []),
+                confidence=float(item.get('confidence', 0.8)),
+                summary=item.get('summary', ''),
+                priority=item.get('priority', 'medium'),
+            ))
+        # Pad if LLM returned fewer than expected
+        while len(results) < count:
+            results.append(ClassificationResult(
+                in_scope=True, confidence=0.5,
+                summary='Classification missing from batch', priority='medium'))
+        return results
 
     def _parse_scope_response(self, text):
         data = json.loads(text)
@@ -452,6 +661,34 @@ class ClaudeAPIClassifier(LLMClassifierBase):
             if self._fallback_on_error:
                 return self._fallback.classify(msg_data)
             raise
+
+    def classify_full(self, msg_data):
+        try:
+            resp = self._client.messages.create(
+                model=self._model,
+                max_tokens=500,
+                system=self._build_full_system_prompt(),
+                messages=[{"role": "user", "content": self._email_summary(msg_data)}],
+            )
+            return self._parse_full_response(resp.content[0].text.strip())
+        except (self._anthropic.APIError, json.JSONDecodeError, KeyError, IndexError) as exc:
+            logger.warning("Claude classify_full failed (%s), falling back", exc)
+            if self._fallback_on_error:
+                return self._fallback.classify_full(msg_data)
+            raise
+
+    def classify_batch(self, email_list):
+        try:
+            resp = self._client.messages.create(
+                model=self._model,
+                max_tokens=300 * len(email_list),
+                system=self._build_batch_system_prompt(len(email_list)),
+                messages=[{"role": "user", "content": self._build_batch_user_prompt(email_list)}],
+            )
+            return self._parse_batch_response(resp.content[0].text.strip(), len(email_list))
+        except Exception as exc:
+            logger.warning("Claude classify_batch failed (%s), falling back to individual", exc)
+            return [self.classify_full(msg) for msg in email_list]
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +784,40 @@ class GeminiClassifier(LLMClassifierBase):
                 return self._fallback.classify(msg_data)
             raise
 
+    def classify_full(self, msg_data):
+        try:
+            from google.genai import types as gtypes
+            resp = self._client.models.generate_content(
+                model=self._model,
+                contents=self._build_full_system_prompt() + "\n\n" + self._email_summary(msg_data),
+                config=gtypes.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=self._full_json_schema(),
+                ),
+            )
+            return self._parse_full_response(self._extract_text(resp))
+        except Exception as exc:
+            logger.warning("Gemini classify_full failed (%s), falling back", exc)
+            if self._fallback_on_error:
+                return self._fallback.classify_full(msg_data)
+            raise
+
+    def classify_batch(self, email_list):
+        try:
+            from google.genai import types as gtypes
+            resp = self._client.models.generate_content(
+                model=self._model,
+                contents=(self._build_batch_system_prompt(len(email_list))
+                          + "\n\n" + self._build_batch_user_prompt(email_list)),
+                config=gtypes.GenerateContentConfig(
+                    response_mime_type="application/json",
+                ),
+            )
+            return self._parse_batch_response(self._extract_text(resp), len(email_list))
+        except Exception as exc:
+            logger.warning("Gemini classify_batch failed (%s), falling back to individual", exc)
+            return [self.classify_full(msg) for msg in email_list]
+
 
 # ---------------------------------------------------------------------------
 # Groq Classifier
@@ -614,6 +885,40 @@ class GroqClassifier(LLMClassifierBase):
                 return self._fallback.classify(msg_data)
             raise
 
+    def classify_full(self, msg_data):
+        try:
+            resp = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": self._build_full_system_prompt()},
+                    {"role": "user", "content": self._email_summary(msg_data)},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=500,
+            )
+            return self._parse_full_response(resp.choices[0].message.content.strip())
+        except Exception as exc:
+            logger.warning("Groq classify_full failed (%s), falling back", exc)
+            if self._fallback_on_error:
+                return self._fallback.classify_full(msg_data)
+            raise
+
+    def classify_batch(self, email_list):
+        try:
+            resp = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": self._build_batch_system_prompt(len(email_list))},
+                    {"role": "user", "content": self._build_batch_user_prompt(email_list)},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=300 * len(email_list),
+            )
+            return self._parse_batch_response(resp.choices[0].message.content.strip(), len(email_list))
+        except Exception as exc:
+            logger.warning("Groq classify_batch failed (%s), falling back to individual", exc)
+            return [self.classify_full(msg) for msg in email_list]
+
 
 # ---------------------------------------------------------------------------
 # Fallback Chain Classifier
@@ -661,6 +966,30 @@ class FallbackChainClassifier(EmailClassifier):
                                clf.__class__.__name__, exc)
         logger.warning("FallbackChain: all classifiers failed for classify, returning defaults")
         return ClassificationResult()
+
+    def classify_full(self, msg_data):
+        for clf in self._classifiers:
+            try:
+                result = clf.classify_full(msg_data)
+                self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
+                return result
+            except Exception as exc:
+                logger.warning("FallbackChain: %s.classify_full failed (%s), trying next",
+                               clf.__class__.__name__, exc)
+        logger.warning("FallbackChain: all classifiers failed for classify_full, returning defaults")
+        return ClassificationResult()
+
+    def classify_batch(self, email_list):
+        for clf in self._classifiers:
+            try:
+                results = clf.classify_batch(email_list)
+                self._last_used_name = getattr(clf, 'name', clf.__class__.__name__)
+                return results
+            except Exception as exc:
+                logger.warning("FallbackChain: %s.classify_batch failed (%s), trying next",
+                               clf.__class__.__name__, exc)
+        logger.warning("FallbackChain: all classifiers failed for classify_batch, returning defaults")
+        return [ClassificationResult() for _ in email_list]
 
 
 # ---------------------------------------------------------------------------
