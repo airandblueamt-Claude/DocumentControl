@@ -1299,10 +1299,10 @@ def api_reclassify():
                 counts['total'] += len(rows)
 
                 for i, row in enumerate(rows):
-                    # Throttle API calls: 1s between requests to stay within
+                    # Throttle API calls: 3s between requests to stay within
                     # free-tier rate limits (Gemini: 10/min, Groq: 30/min)
                     if i > 0:
-                        time.sleep(1)
+                        time.sleep(3)
 
                     try:
                         msg_data = {
