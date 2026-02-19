@@ -2136,7 +2136,10 @@ function renderProcessedTable(){
         html+='<span>'+fmtTime(e.processed_at)+'</span>';
         if(e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
         if(e.response_required) html+='<span class="resp-yes">Response needed</span>';
-        html+='</div></div>';
+        html+='</div>';
+        var procCc=fmtRecipientsShort(e.cc_recipients);
+        if(procCc) html+='<div class="card-meta"><span class="cc-label">CC:</span> <span>'+procCc+'</span></div>';
+        html+='</div>';
         if(fuCount>0) html+='<button class="expand-btn" id="expand-'+esc(e.transmittal_no)+'" onclick="toggleFollowUps(\''+esc(e.transmittal_no)+'\')">+'+fuCount+'</button>';
         html+='</div>';
         html+='<div class="card-tags">';
@@ -2162,7 +2165,7 @@ function renderProcessedTable(){
     // Desktop table
     var exp=viewModes.processed==='expanded'?' table-expanded':'';
     html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
-        '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>Subject</th>'+
+        '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>CC</th><th>Subject</th>'+
         '<th>Type</th><th>Discipline</th><th>Assigned To</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
     for(var i=0;i<items.length;i++){
         var e=items[i], idx=page*perPage+i+1;
@@ -2172,10 +2175,12 @@ function renderProcessedTable(){
         var rc=e.response_required?'resp-yes':'resp-no', rt=e.response_required?'Yes':'No';
         var fuBtn=fups.length>0?'<button class="expand-btn" id="expand-'+esc(e.transmittal_no)+'" onclick="toggleFollowUps(\''+esc(e.transmittal_no)+'\')">+'+fups.length+'</button>':'';
         var autoTag3=(e.classifier_method&&e.classifier_method.indexOf('Auto')===0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto</span>':'';
+        var procCcShort=fmtRecipientsShort(e.cc_recipients);
         html+='<tr><td class="col-num">'+idx+'</td>'+
             '<td><strong>'+esc(e.transmittal_no)+'</strong>'+autoTag3+' '+fuBtn+'</td>'+
             '<td style="white-space:nowrap">'+fmtTime(e.processed_at)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
+            '<td class="col-cc" title="'+esc(fmtRecipientsTitle(e.cc_recipients))+'">'+procCcShort+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
             '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.assigned_to||'')+'</td>'+
             '<td><span class="'+rc+'">'+rt+'</span></td><td id="proc-att-'+esc(e.message_id)+'">'+(e.attachment_count||0)+'</td></tr>';
@@ -2184,11 +2189,13 @@ function renderProcessedTable(){
             var fu=fups[fi];
             var fsd=esc(fu.sender_name||fu.sender);
             if(fu.sender_company) fsd+='<span class="sender-company">'+esc(fu.sender_company)+'</span>';
+            var fuCcShort=fmtRecipientsShort(fu.cc_recipients);
             html+='<tr class="follow-up-row fu-row-'+esc(e.transmittal_no)+'" style="display:none">'+
                 '<td></td>'+
                 '<td><span class="follow-up-indicator">&#8627;</span></td>'+
                 '<td style="white-space:nowrap">'+fmtTime(fu.processed_at)+'</td>'+
                 '<td class="col-sender" title="'+esc(fu.sender)+'">'+fsd+'</td>'+
+                '<td class="col-cc" title="'+esc(fmtRecipientsTitle(fu.cc_recipients))+'">'+fuCcShort+'</td>'+
                 '<td class="col-subject">'+esc(fu.subject)+'</td>'+
                 '<td>'+esc(fu.doc_type||'')+'</td><td>'+esc(fu.discipline||'')+'</td><td>'+esc(fu.assigned_to||'')+'</td>'+
                 '<td></td><td>'+(fu.attachment_count||0)+'</td></tr>';
