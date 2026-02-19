@@ -368,6 +368,22 @@
         .resp-yes { color: var(--danger); font-weight: 600; }
         .resp-no { color: var(--text-light); }
 
+        /* CC column */
+        td.col-cc { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-muted); }
+        .table-expanded td.col-cc { max-width: none; white-space: normal; word-wrap: break-word; }
+        .cc-label { font-weight: 600; color: var(--text-light); font-size: 11px; }
+
+        /* Person assignment tag */
+        .tag-person { background: #dbeafe; color: #1e40af; }
+        [data-theme="dark"] .tag-person { background: #1e3a5f; color: #93c5fd; }
+
+        /* Scope badge */
+        .scope-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-left: 6px; }
+        .scope-in { background: #dcfce7; color: #166534; }
+        .scope-out { background: #fee2e2; color: #991b1b; }
+        [data-theme="dark"] .scope-in { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .scope-out { background: #7f1d1d; color: #fca5a5; }
+
         /* Thread badges */
         .thread-badge {
             display: inline-block; font-size: 9px; font-weight: 700;
@@ -1332,8 +1348,11 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group"><label>Company</label><input type="text" id="contactCompany" placeholder="e.g. AECOM"></div>
-                        <div class="form-group"><label>Dept.</label><input type="text" id="contactDept" placeholder="e.g. Eng."></div>
+                        <div class="form-group"><label>Role</label><input type="text" id="contactRole" placeholder="e.g. Engineer"></div>
                         <div class="form-group"><label>Notes</label><input type="text" id="contactNotes" placeholder="Optional"></div>
+                    </div>
+                    <div class="form-row" style="align-items:center">
+                        <div class="form-group" style="max-width:200px"><label><input type="checkbox" id="contactIsTeam" style="width:auto;height:auto;margin-right:6px">Team Member</label></div>
                     </div>
                     <button class="btn btn-primary" onclick="addContact()" style="align-self:flex-end">Add Contact</button>
                 </div>
@@ -1344,7 +1363,7 @@
 
 <script>
 // ---- State ----
-var classificationOptions = { doc_types: [], disciplines: [], departments: [] };
+var classificationOptions = { doc_types: [], disciplines: [], departments: [], team_members: [] };
 var pendingEmails = [];
 var processedEmails = [];
 var selectedIds = new Set();
@@ -1382,6 +1401,34 @@ function fmtRecipients(jsonStr) {
         var n=(r.name||'').trim(), e2=(r.email||'').trim();
         if(n&&e2) return esc(n+' <'+e2+'>'); return esc(n||e2);
     }).join(', ');
+}
+function fmtRecipientsShort(jsonStr) {
+    var arr; try{arr=JSON.parse(jsonStr||'[]');}catch(e){return '';}
+    if(!Array.isArray(arr)||!arr.length) return '';
+    var names=arr.map(function(r){
+        if(typeof r==='string') return r.split('@')[0];
+        return (r.name||'').trim() || (r.email||'').split('@')[0];
+    });
+    if(names.length<=2) return esc(names.join(', '));
+    return esc(names[0]+', '+names[1]+' +' +(names.length-2));
+}
+function fmtRecipientsTitle(jsonStr) {
+    var arr; try{arr=JSON.parse(jsonStr||'[]');}catch(e){return jsonStr||'';}
+    if(!Array.isArray(arr)||!arr.length) return '';
+    return arr.map(function(r){
+        if(typeof r==='string') return r;
+        var n=(r.name||'').trim(), e2=(r.email||'').trim();
+        if(n&&e2) return n+' <'+e2+'>'; return n||e2;
+    }).join('; ');
+}
+function makeTeamOptions(sel) {
+    var members=classificationOptions.team_members||[];
+    if(!members.length) return '<option value="" disabled>No team members configured</option>';
+    return members.map(function(m){
+        var label=m.name;
+        if(m.role) label+=' ('+m.role+')';
+        return '<option value="'+esc(m.name)+'"'+(m.name===sel?' selected':'')+'>'+esc(label)+'</option>';
+    }).join('');
 }
 function fmtFileSize(b) {
     if(!b||b===0) return ''; if(b<1024) return b+' B';
@@ -1698,12 +1745,14 @@ function renderPendingTable() {
         html+='<span>'+fmtTime(isRejected && e.decided_at ? e.decided_at : e.scanned_at)+'</span>';
         if(isReview && e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
         html+='</div>';
+        var ccLine=fmtRecipientsShort(e.cc_recipients);
+        if(ccLine) html+='<div class="card-meta"><span class="cc-label">CC:</span> <span>'+ccLine+'</span></div>';
         html+='</div></div>';
         html+='<div class="card-row">';
         html+='<div class="card-tags">';
         if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
         if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
-        if(e.department) html+='<span class="card-tag">'+esc(e.department)+'</span>';
+        if(e.assigned_to) html+='<span class="card-tag tag-person">'+esc(e.assigned_to)+'</span>';
         html+=renderAiBadge(e.classifier_method, e.confidence);
         html+='</div>';
         html+='<div class="card-actions">';
@@ -1727,8 +1776,8 @@ function renderPendingTable() {
     var exp=viewModes.pending==='expanded'?' table-expanded':'';
     html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>';
     if(isReview) html+='<th style="width:30px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>';
-    html+='<th style="width:30px">#</th><th>Date</th><th>From</th><th>Subject</th>';
-    if(isReview) html+='<th>Att.</th><th>Type</th><th>Discipline</th><th>Dept.</th>';
+    html+='<th style="width:30px">#</th><th>Date</th><th>From</th><th>CC</th><th>Subject</th>';
+    if(isReview) html+='<th>Att.</th><th>Type</th><th>Discipline</th><th>Assign To</th>';
     html+='<th>AI</th>';
     html+='<th>Actions</th>';
     html+='</tr></thead><tbody>';
@@ -1740,15 +1789,17 @@ function renderPendingTable() {
         var dateCol = isRejected && e.decided_at ? e.decided_at : e.scanned_at;
         html+='<tr>';
         if(isReview) html+='<td><input type="checkbox" data-id="'+e.id+'"'+checked+' onchange="onRowSelect()"></td>';
+        var ccShort=fmtRecipientsShort(e.cc_recipients);
         html+='<td class="col-num">'+idx+'</td>'+
             '<td style="white-space:nowrap">'+fmtTime(dateCol)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+esc(e.sender_name||e.sender)+senderBadge+senderCompany+'</td>'+
+            '<td class="col-cc" title="'+esc(fmtRecipientsTitle(e.cc_recipients))+'">'+ccShort+'</td>'+
             '<td class="col-subject"><span class="subject-link" onclick="openDetailModal('+e.id+')">'+esc(e.subject)+'</span>'+renderThreadBadges(e)+'</td>';
         if(isReview){
             html+='<td id="att-cell-'+e.id+'">'+(e.attachment_count||0)+'</td>'+
                 '<td><select class="inline-select" data-id="'+e.id+'" data-field="doc_type">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></td>'+
                 '<td><select class="inline-select" data-id="'+e.id+'" data-field="discipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></td>'+
-                '<td><select class="inline-select" data-id="'+e.id+'" data-field="department"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></td>';
+                '<td><select class="inline-select" data-id="'+e.id+'" data-field="assigned_to"><option value="">-- Select --</option>'+makeTeamOptions(e.assigned_to)+'</select></td>';
         }
         html+='<td>'+renderAiBadge(e.classifier_method, e.confidence)+'</td>';
         if(isReview){
@@ -1882,13 +1933,17 @@ function openDetailModal(id){
         if(e.error){document.getElementById('modalBody').innerHTML='<div class="empty-state">'+esc(e.error)+'</div>';return;}
         document.getElementById('modalSubject').textContent=e.subject||'(no subject)';
         var to=fmtRecipients(e.to_recipients), cc=fmtRecipients(e.cc_recipients);
+        var scopeBadge = e.status==='out_of_scope'
+            ? '<span class="scope-badge scope-out">Out of Scope</span>'
+            : '<span class="scope-badge scope-in">In Scope</span>';
         var h='';
         h+='<div class="modal-fields-row">';
-        h+='<div class="modal-field"><div class="modal-field-label">From</div><div class="modal-field-value">'+esc(e.sender_name||e.sender);
+        h+='<div class="modal-field"><div class="modal-field-label">From</div><div class="modal-field-value" style="font-size:14px;font-weight:600">'+esc(e.sender_name||'');
+        h+=' <span style="font-weight:400;color:var(--text-muted)">&lt;'+esc(e.sender)+'&gt;</span>';
         h+=(e.sender_known?' <span class="sender-known">Known</span>':' <span class="sender-unknown">Unknown</span>');
         if(e.sender_company) h+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
         h+='</div></div>';
-        h+='<div class="modal-field"><div class="modal-field-label">Date</div><div class="modal-field-value">'+fmtTime(e.email_date||e.scanned_at)+'</div></div>';
+        h+='<div class="modal-field"><div class="modal-field-label">Date</div><div class="modal-field-value">'+fmtTime(e.email_date||e.scanned_at)+scopeBadge+'</div></div>';
         h+='</div>';
         h+='<div class="modal-fields-row">';
         h+='<div class="modal-field"><div class="modal-field-label">To</div><div class="modal-field-value">'+to+'</div></div>';
@@ -1931,8 +1986,8 @@ function openDetailModal(id){
             if(e.ai_summary) h+='<div class="ai-panel-summary">'+esc(e.ai_summary)+'</div>';
             h+='<div class="ai-panel-row">';
             h+='<span class="priority-badge '+priClass+'">Priority: '+priLabel+'</span>';
-            if(e.confidence>=0.8 && e.department){
-                h+='<span class="ai-suggestion">Suggested: <span class="suggest-action">Approve &rarr; '+esc(e.department)+'</span></span>';
+            if(e.confidence>=0.8 && e.doc_type){
+                h+='<span class="ai-suggestion">Suggested: <span class="suggest-action">Approve &rarr; '+esc(e.doc_type)+'</span></span>';
             } else {
                 h+='<span class="ai-suggestion"><span class="suggest-review">Review carefully</span> — confidence '+((e.confidence||0)*100).toFixed(0)+'%</span>';
             }
@@ -1969,7 +2024,7 @@ function openDetailModal(id){
             h+='<div class="modal-fields-row">';
             h+='<div class="modal-field"><div class="modal-field-label">Document Type</div><select class="modal-select" id="modalDocType">'+makeOptions(classificationOptions.doc_types,e.doc_type)+'</select></div>';
             h+='<div class="modal-field"><div class="modal-field-label">Discipline</div><select class="modal-select" id="modalDiscipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></div>';
-            h+='<div class="modal-field"><div class="modal-field-label">Department</div><select class="modal-select" id="modalDepartment"><option value="">--</option>'+makeOptions(classificationOptions.departments,e.department)+'</select></div>';
+            h+='<div class="modal-field"><div class="modal-field-label">Assign To</div><select class="modal-select" id="modalAssignedTo"><option value="">-- Select Person --</option>'+makeTeamOptions(e.assigned_to)+'</select></div>';
             h+='</div>';
         }
         document.getElementById('modalBody').innerHTML=h;
@@ -1985,7 +2040,7 @@ function toggleFullBody(){
 }
 function modalApprove(){
     if(!currentModalId)return;
-    var edits={doc_type:document.getElementById('modalDocType').value,discipline:document.getElementById('modalDiscipline').value,department:document.getElementById('modalDepartment').value};
+    var edits={doc_type:document.getElementById('modalDocType').value,discipline:document.getElementById('modalDiscipline').value,assigned_to:document.getElementById('modalAssignedTo').value};
     fetch('/api/pending/'+currentModalId+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(edits)})
     .then(function(r){return r.json();}).then(function(d){
         if(d.error){showToast(d.error,'error');return;}
@@ -2087,7 +2142,7 @@ function renderProcessedTable(){
         html+='<div class="card-tags">';
         if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
         if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
-        if(e.department) html+='<span class="card-tag">'+esc(e.department)+'</span>';
+        if(e.assigned_to) html+='<span class="card-tag tag-person">'+esc(e.assigned_to)+'</span>';
         html+='</div></div>';
         // Follow-up cards (hidden by default)
         for(var fi=0;fi<fups.length;fi++){
@@ -2108,7 +2163,7 @@ function renderProcessedTable(){
     var exp=viewModes.processed==='expanded'?' table-expanded':'';
     html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
         '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>Subject</th>'+
-        '<th>Type</th><th>Discipline</th><th>Dept.</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
+        '<th>Type</th><th>Discipline</th><th>Assigned To</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
     for(var i=0;i<items.length;i++){
         var e=items[i], idx=page*perPage+i+1;
         var fups=e.follow_ups||[];
@@ -2122,7 +2177,7 @@ function renderProcessedTable(){
             '<td style="white-space:nowrap">'+fmtTime(e.processed_at)+'</td>'+
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
-            '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.department||'')+'</td>'+
+            '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.assigned_to||'')+'</td>'+
             '<td><span class="'+rc+'">'+rt+'</span></td><td id="proc-att-'+esc(e.message_id)+'">'+(e.attachment_count||0)+'</td></tr>';
         // Follow-up rows (hidden by default)
         for(var fi=0;fi<fups.length;fi++){
@@ -2135,7 +2190,7 @@ function renderProcessedTable(){
                 '<td style="white-space:nowrap">'+fmtTime(fu.processed_at)+'</td>'+
                 '<td class="col-sender" title="'+esc(fu.sender)+'">'+fsd+'</td>'+
                 '<td class="col-subject">'+esc(fu.subject)+'</td>'+
-                '<td>'+esc(fu.doc_type||'')+'</td><td>'+esc(fu.discipline||'')+'</td><td>'+esc(fu.department||'')+'</td>'+
+                '<td>'+esc(fu.doc_type||'')+'</td><td>'+esc(fu.discipline||'')+'</td><td>'+esc(fu.assigned_to||'')+'</td>'+
                 '<td></td><td>'+(fu.attachment_count||0)+'</td></tr>';
         }
     }
@@ -2230,33 +2285,39 @@ function fetchContacts(){
             var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';
             html+='<div class="email-card">';
             var autoTag=(c.notes&&c.notes.indexOf('Auto-learned')>=0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto-learned</span>':'';
-            html+='<div class="card-row"><div style="flex:1"><strong>'+esc(c.name)+'</strong> '+autoTag+' <span class="'+sc+'">'+st+'</span></div></div>';
+            var teamTag=c.is_team_member?' <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-weight:700">Team</span>':'';
+            html+='<div class="card-row"><div style="flex:1"><strong>'+esc(c.name)+'</strong> '+teamTag+autoTag+' <span class="'+sc+'">'+st+'</span></div></div>';
             html+='<div class="card-meta">';
             html+='<span>'+esc(c.email)+'</span>';
             if(c.company) html+='<span>'+esc(c.company)+'</span>';
-            if(c.department) html+='<span>'+esc(c.department)+'</span>';
+            if(c.role) html+='<span>'+esc(c.role)+'</span>';
             html+='</div>';
             if(c.notes) html+='<div style="font-size:11px;color:var(--text-muted)">'+esc(c.notes)+'</div>';
             html+='<div class="card-actions">';
+            var tmBtn=c.is_team_member?'<button class="btn btn-ghost btn-sm" onclick="toggleTeamMember('+c.id+',false)">Remove Team</button>':'<button class="btn btn-ghost btn-sm" onclick="toggleTeamMember('+c.id+',true)">Make Team</button>';
+            html+=tmBtn;
             html+='<button class="btn btn-ghost btn-sm" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button>';
             html+='<button class="btn btn-danger btn-sm" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button>';
             html+='</div></div>';
         }
         html+='</div>';
         // Desktop table
-        html+='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Company</th><th>Dept.</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+        html+='<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Company</th><th>Role</th><th>Team</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
         for(var i=0;i<cs.length;i++){
             var c=cs[i],sc=c.is_active?'active-badge':'inactive-badge',st=c.is_active?'Active':'Inactive',tt=c.is_active?'Deactivate':'Activate';
             var autoTag2=(c.notes&&c.notes.indexOf('Auto-learned')>=0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto-learned</span>':'';
-            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(c.name)+'</strong>'+autoTag2+'</td><td>'+esc(c.email)+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.department||'')+'</td><td>'+esc(c.notes||'')+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions"><button class="btn btn-ghost btn-sm" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button></div></td></tr>';
+            var teamBadge=c.is_team_member?'<span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:3px;font-weight:700">Team</span>':'<span style="color:var(--text-light);font-size:11px">--</span>';
+            var tmAction=c.is_team_member?'<button class="btn btn-ghost btn-sm" onclick="toggleTeamMember('+c.id+',false)">Remove Team</button>':'<button class="btn btn-ghost btn-sm" onclick="toggleTeamMember('+c.id+',true)">Make Team</button>';
+            html+='<tr><td class="col-num">'+(i+1)+'</td><td><strong>'+esc(c.name)+'</strong>'+autoTag2+'</td><td>'+esc(c.email)+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.role||'')+'</td><td>'+teamBadge+'</td><td><span class="'+sc+'">'+st+'</span></td><td class="col-actions"><div class="row-actions">'+tmAction+'<button class="btn btn-ghost btn-sm" onclick="toggleContact('+c.id+','+(c.is_active?'false':'true')+')">'+tt+'</button><button class="btn btn-danger btn-sm" onclick="deleteContact('+c.id+',\''+esc(c.name)+'\')">Delete</button></div></td></tr>';
         }
         html+='</tbody></table></div>';
         w.innerHTML=html;
     }).catch(function(){});
 }
-function addContact(){var n=document.getElementById('contactName').value.trim(),e=document.getElementById('contactEmail').value.trim(),co=document.getElementById('contactCompany').value.trim(),dp=document.getElementById('contactDept').value.trim(),nt=document.getElementById('contactNotes').value.trim();if(!n||!e){showToast('Name & email required','error');return;}fetch('/api/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,company:co,department:dp,notes:nt})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('contactName').value='';document.getElementById('contactEmail').value='';document.getElementById('contactCompany').value='';document.getElementById('contactDept').value='';document.getElementById('contactNotes').value='';fetchContacts();}).catch(function(){showToast('Failed','error');});}
+function addContact(){var n=document.getElementById('contactName').value.trim(),e=document.getElementById('contactEmail').value.trim(),co=document.getElementById('contactCompany').value.trim(),rl=document.getElementById('contactRole').value.trim(),nt=document.getElementById('contactNotes').value.trim(),tm=document.getElementById('contactIsTeam').checked;if(!n||!e){showToast('Name & email required','error');return;}fetch('/api/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,company:co,role:rl,notes:nt,is_team_member:tm})}).then(function(r){return r.json();}).then(function(d){if(d.error){showToast(d.error,'error');return;}showToast('"'+n+'" added','success');document.getElementById('contactName').value='';document.getElementById('contactEmail').value='';document.getElementById('contactCompany').value='';document.getElementById('contactRole').value='';document.getElementById('contactNotes').value='';document.getElementById('contactIsTeam').checked=false;fetchContacts();fetchClassificationOptions();}).catch(function(){showToast('Failed','error');});}
 function toggleContact(id,a){fetch('/api/contacts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active:a})}).then(function(r){return r.json();}).then(function(){fetchContacts();}).catch(function(){});}
-function deleteContact(id,n){if(!confirm('Delete "'+n+'"?'))return;fetch('/api/contacts/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){showToast('Deleted','info');fetchContacts();}).catch(function(){});}
+function deleteContact(id,n){if(!confirm('Delete "'+n+'"?'))return;fetch('/api/contacts/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){showToast('Deleted','info');fetchContacts();fetchClassificationOptions();}).catch(function(){});}
+function toggleTeamMember(id,val){fetch('/api/contacts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_team_member:val})}).then(function(r){return r.json();}).then(function(){showToast(val?'Added to team':'Removed from team','success');fetchContacts();fetchClassificationOptions();}).catch(function(){});}
 
 // ---- Classification Options ----
 function fetchClassificationOptions(){fetch('/api/classification-options').then(function(r){return r.json();}).then(function(d){classificationOptions=d;}).catch(function(){});}

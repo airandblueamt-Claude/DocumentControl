@@ -130,6 +130,10 @@ _MIGRATIONS = [
     ("pending_emails", "ai_priority", "TEXT DEFAULT 'medium'"),
     ("pending_emails", "user_corrections", "TEXT"),
     ("pending_emails", "auto_approved", "INTEGER DEFAULT 0"),
+    ("contacts", "is_team_member", "INTEGER DEFAULT 0"),
+    ("contacts", "role", "TEXT"),
+    ("pending_emails", "assigned_to", "TEXT"),
+    ("processed_messages", "assigned_to", "TEXT"),
 ]
 
 
@@ -309,7 +313,7 @@ class ProcessingTracker:
                       references_json, attachment_count, transmittal_no,
                       classifier_method, confidence,
                       conversation_id, conversation_position,
-                      ai_summary, ai_priority
+                      ai_summary, ai_priority, assigned_to
                FROM pending_emails WHERE status = ?
                ORDER BY scanned_at DESC LIMIT ?""",
             (status, limit),
@@ -380,7 +384,7 @@ class ProcessingTracker:
 
         # Apply user edits
         if edits:
-            for key in ('doc_type', 'discipline', 'department'):
+            for key in ('doc_type', 'discipline', 'department', 'assigned_to'):
                 if key in edits and edits[key] is not None:
                     pe[key] = edits[key]
 
@@ -400,8 +404,8 @@ class ProcessingTracker:
                (message_id, transmittal_no, processed_at, sender, sender_name,
                 to_recipients, cc_recipients, subject, attachment_count,
                 doc_type, discipline, department, response_required, references_json,
-                conversation_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                conversation_id, assigned_to)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 pe['message_id'],
                 transmittal_no,
@@ -418,6 +422,7 @@ class ProcessingTracker:
                 pe.get('response_required', 0),
                 pe.get('references_json', '[]'),
                 pe.get('conversation_id'),
+                pe.get('assigned_to', ''),
             ),
         )
 
@@ -426,7 +431,8 @@ class ProcessingTracker:
         self._conn.execute(
             """UPDATE pending_emails
                SET status = 'approved', decided_at = ?, transmittal_no = ?,
-                   doc_type = ?, discipline = ?, department = ?
+                   doc_type = ?, discipline = ?, department = ?,
+                   assigned_to = ?
                WHERE id = ?""",
             (
                 now,
@@ -434,6 +440,7 @@ class ProcessingTracker:
                 pe['doc_type'],
                 pe['discipline'],
                 pe.get('department', ''),
+                pe.get('assigned_to', ''),
                 pending_id,
             ),
         )
@@ -644,7 +651,8 @@ class ProcessingTracker:
         return cur.lastrowid
 
     def update_contact(self, contact_id, name=None, email=None, company=None,
-                       department=None, notes=None, is_active=None):
+                       department=None, notes=None, is_active=None,
+                       is_team_member=None, role=None):
         """Update a contact."""
         updates = []
         params = []
@@ -666,6 +674,12 @@ class ProcessingTracker:
         if is_active is not None:
             updates.append("is_active = ?")
             params.append(1 if is_active else 0)
+        if is_team_member is not None:
+            updates.append("is_team_member = ?")
+            params.append(1 if is_team_member else 0)
+        if role is not None:
+            updates.append("role = ?")
+            params.append(role)
         if not updates:
             return
         updates.append("updated_at = ?")
@@ -692,6 +706,19 @@ class ProcessingTracker:
         row = cur.fetchone()
         self._conn.row_factory = None
         return dict(row) if row else None
+
+    def get_team_members(self):
+        """Get all active contacts marked as team members."""
+        self._conn.row_factory = sqlite3.Row
+        try:
+            cur = self._conn.execute(
+                "SELECT * FROM contacts WHERE is_team_member = 1 AND is_active = 1 ORDER BY name"
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+        except sqlite3.OperationalError:
+            rows = []
+        self._conn.row_factory = None
+        return rows
 
     def find_contacts_by_emails(self, emails):
         """Look up multiple contacts by email. Returns {email: contact_dict}."""

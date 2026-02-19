@@ -859,7 +859,8 @@ def api_emails():
                       pm.to_recipients, pm.cc_recipients, pm.subject, pm.attachment_count,
                       pm.doc_type, pm.discipline, pm.department, pm.response_required,
                       pm.references_json, pm.conversation_id, pm.message_id,
-                      pe.classifier_method, pe.auto_approved
+                      pe.classifier_method, pe.auto_approved,
+                      pm.assigned_to
                FROM processed_messages pm
                LEFT JOIN pending_emails pe ON pm.message_id = pe.message_id
                {join_where}
@@ -1527,6 +1528,9 @@ def api_contacts_add():
     if not name or not email:
         return jsonify({'error': 'Name and email are required'}), 400
 
+    is_team = data.get('is_team_member', False)
+    role = data.get('role', '').strip()
+
     tracker = _get_tracker()
     try:
         contact_id = tracker.add_contact(
@@ -1536,6 +1540,9 @@ def api_contacts_add():
             department=data.get('department', '').strip(),
             notes=data.get('notes', '').strip(),
         )
+        # Set team member flag and role if provided
+        if is_team or role:
+            tracker.update_contact(contact_id, is_team_member=1 if is_team else None, role=role or None)
         return jsonify({'id': contact_id, 'message': f'Contact "{name}" added'}), 201
     except sqlite3.IntegrityError:
         return jsonify({'error': f'Contact with email "{email}" already exists'}), 409
@@ -1556,6 +1563,8 @@ def api_contacts_update(contact_id):
             department=data.get('department'),
             notes=data.get('notes'),
             is_active=data.get('is_active'),
+            is_team_member=data.get('is_team_member'),
+            role=data.get('role'),
         )
         return jsonify({'message': 'Updated'})
     except sqlite3.IntegrityError:
@@ -1615,7 +1624,7 @@ def api_export_excel():
                       pm.to_recipients, pm.cc_recipients, pm.subject,
                       pm.references_json, pm.doc_type, pm.discipline,
                       pm.response_required, pm.attachment_count,
-                      pm.message_id, pe.attachment_folder
+                      pm.message_id, pe.attachment_folder, pm.assigned_to
                FROM processed_messages pm
                LEFT JOIN pending_emails pe ON pm.message_id = pe.message_id
                ORDER BY pm.processed_at DESC"""
@@ -1661,6 +1670,7 @@ def api_export_excel():
             'Y' if row['response_required'] else 'N',
             row['attachment_count'] or 0,
             row['attachment_folder'] or '',
+            row['assigned_to'] or '',
             row['message_id'] or '',
         ])
 
@@ -1685,11 +1695,24 @@ def api_classification_options():
     tracker = _get_tracker()
     try:
         departments = tracker.get_departments(active_only=True)
+        team_members = tracker.get_team_members()
         return jsonify({
             'doc_types': list(class_cfg.get('type_keywords', {}).keys()),
             'disciplines': list(class_cfg.get('discipline_keywords', {}).keys()),
             'departments': [d['name'] for d in departments],
+            'team_members': [{'name': m['name'], 'department': m.get('department', ''), 'role': m.get('role', '')} for m in team_members],
         })
+    finally:
+        tracker.close()
+
+
+@app.route('/api/team-members')
+def api_team_members():
+    """Return all active team members (contacts with is_team_member=1)."""
+    tracker = _get_tracker()
+    try:
+        members = tracker.get_team_members()
+        return jsonify({'team_members': members})
     finally:
         tracker.close()
 

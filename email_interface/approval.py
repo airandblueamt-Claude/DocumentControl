@@ -54,7 +54,7 @@ def _detect_corrections(tracker, pending_id, edits):
         return None
 
     corrections = {}
-    for field in ('doc_type', 'discipline', 'department'):
+    for field in ('doc_type', 'discipline', 'department', 'assigned_to'):
         if field in edits and edits[field] is not None:
             original = pe.get(field, '') or ''
             new_val = edits[field] or ''
@@ -153,6 +153,7 @@ def _log_to_excel(pe, transmittal_no, saved_files, base_dir):
         'response_required': pe.get('response_required'),
         'attachments': [{}] * pe.get('attachment_count', 0),
         'attachments_saved': saved_files,
+        'assigned_to': pe.get('assigned_to', ''),
         'message_id': pe.get('message_id', ''),
     }
     update_excel_log([excel_entry], excel_path)

@@ -26,7 +26,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXCEL_HEADERS = [
     'Transmittal No', 'Date', 'From', 'To', 'CC', 'Subject',
     'Reference', 'Type', 'Discipline', 'Response Required',
-    'Attachment Count', 'Attachment Folder', 'Message ID',
+    'Attachment Count', 'Attachment Folder', 'Assigned To', 'Message ID',
 ]
 
 
@@ -94,6 +94,7 @@ def update_excel_log(processed_emails, excel_path):
             'Y' if entry.get('response_required') else 'N',
             len(entry.get('attachments', [])),
             att_folder,
+            entry.get('assigned_to', ''),
             entry.get('message_id', ''),
         ]
         ws.append(row)
