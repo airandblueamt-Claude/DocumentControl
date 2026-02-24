@@ -714,6 +714,7 @@
         .attn-dot.dot-amber { background: var(--warn); }
         .attn-dot.dot-purple { background: var(--purple); }
         .attn-dot.dot-gray { background: var(--text-light); }
+        .attn-dot.dot-orange { background: #f97316; }
         .attn-label { font-size: 10px; font-weight: 600; color: var(--text-light); margin-left: auto; white-space: nowrap; }
         .attn-empty { font-size: 12px; color: var(--text-light); padding: 8px 0; }
 
@@ -1067,6 +1068,10 @@
                     <div class="kpi-value" id="kpiAutoApproved">--</div>
                     <div class="kpi-label">Auto-Approved</div>
                 </div>
+                <div class="kpi-card border-danger">
+                    <div class="kpi-value" id="kpiOverdue">--</div>
+                    <div class="kpi-label">Overdue</div>
+                </div>
                 <div class="kpi-card border-warn">
                     <div class="kpi-value text-warn" id="kpiRejected">--</div>
                     <div class="kpi-label">Rejected</div>
@@ -1176,6 +1181,77 @@
                     </div>
                     <button class="btn btn-primary btn-sm" onclick="saveAutoSettings()" style="margin-top:8px">Save Settings</button>
                     <span id="autoSettingsStatus" style="margin-left:8px;font-size:12px;color:var(--text-muted)"></span>
+                </div>
+            </div>
+
+            <!-- Email Sending Settings (collapsible) -->
+            <div class="summary-card" style="margin-bottom:16px">
+                <div class="summary-card-title" onclick="toggleEmailSettings()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                    Email Sending Settings
+                    <span id="emailSettingsToggle" style="font-size:12px;color:var(--text-muted)">&#9660;</span>
+                </div>
+                <div id="emailSettingsBody" style="display:none;padding-top:12px">
+                    <!-- SMTP Status -->
+                    <div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:8px">
+                        <div style="font-weight:600;font-size:13px;margin-bottom:8px">SMTP Status</div>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                            <span id="smtpStatusBadge" style="font-size:12px;padding:3px 8px;border-radius:4px;background:var(--border);color:var(--text-muted)">Checking...</span>
+                            <span id="smtpHostInfo" style="font-size:12px;color:var(--text-muted)"></span>
+                            <button class="btn btn-ghost btn-sm" onclick="testSmtp()" style="font-size:11px">Test SMTP</button>
+                        </div>
+                    </div>
+
+                    <!-- Enable toggles -->
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:16px">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                            <input type="checkbox" id="smtpEnabledCb" onchange="saveEmailSettings()">
+                            <span style="font-weight:600">Enable SMTP Sending</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                            <input type="checkbox" id="ackEnabledCb" onchange="saveEmailSettings()">
+                            <span style="font-weight:600">Send Acknowledgments</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                            <input type="checkbox" id="reminderEnabledCb" onchange="saveEmailSettings()">
+                            <span style="font-weight:600">Send Reminders</span>
+                        </label>
+                    </div>
+
+                    <!-- Reminder settings -->
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px">
+                        <div>
+                            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Remind after <strong id="reminderDaysVal">3</strong> days</label>
+                            <input type="range" id="reminderDays" min="1" max="14" step="1" value="3" oninput="document.getElementById('reminderDaysVal').textContent=this.value" style="width:100%">
+                        </div>
+                        <div>
+                            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Max <strong id="reminderMaxVal">3</strong> reminders</label>
+                            <input type="range" id="reminderMax" min="1" max="10" step="1" value="3" oninput="document.getElementById('reminderMaxVal').textContent=this.value" style="width:100%">
+                        </div>
+                    </div>
+
+                    <!-- Template editors (collapsible) -->
+                    <details style="margin-bottom:12px">
+                        <summary style="cursor:pointer;font-weight:600;font-size:13px;margin-bottom:8px">Acknowledgment Template</summary>
+                        <div style="margin-top:8px">
+                            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Subject</label>
+                            <input type="text" id="ackTplSubject" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-bottom:8px">
+                            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Body <span style="opacity:0.7">(Variables: {sender_name}, {subject}, {transmittal_no}, {date})</span></label>
+                            <textarea id="ackTplBody" rows="8" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:monospace;font-size:12px;resize:vertical"></textarea>
+                        </div>
+                    </details>
+                    <details style="margin-bottom:12px">
+                        <summary style="cursor:pointer;font-weight:600;font-size:13px;margin-bottom:8px">Reminder Template</summary>
+                        <div style="margin-top:8px">
+                            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Subject</label>
+                            <input type="text" id="reminderTplSubject" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-bottom:8px">
+                            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Body <span style="opacity:0.7">(Variables: {sender_name}, {subject}, {transmittal_no}, {date}, {days_overdue})</span></label>
+                            <textarea id="reminderTplBody" rows="8" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:monospace;font-size:12px;resize:vertical"></textarea>
+                        </div>
+                    </details>
+
+                    <button class="btn btn-primary btn-sm" onclick="saveEmailSettings()" style="margin-top:4px">Save Email Settings</button>
+                    <button class="btn btn-ghost btn-sm" onclick="saveEmailTemplates()" style="margin-left:8px">Save Templates</button>
+                    <span id="emailSettingsStatus" style="margin-left:8px;font-size:12px;color:var(--text-muted)"></span>
                 </div>
             </div>
 
@@ -2165,6 +2241,9 @@ function openDetailModal(id){
             h+='<div class="modal-field"><div class="modal-field-label">Discipline</div><select class="modal-select" id="modalDiscipline">'+makeOptions(classificationOptions.disciplines,e.discipline)+'</select></div>';
             h+='<div class="modal-field"><div class="modal-field-label">Assign To</div><select class="modal-select" id="modalAssignedTo"><option value="">-- Select Person --</option>'+makeTeamOptions(e.assigned_to)+'</select></div>';
             h+='</div>';
+            h+='<div class="modal-fields-row">';
+            h+='<div class="modal-field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="modalAckRequired" '+(e.acknowledgment_required?'checked':'')+'> <span style="font-weight:600;font-size:13px">Acknowledgment Required</span></label></div>';
+            h+='</div>';
         }
         document.getElementById('modalBody').innerHTML=h;
     }).catch(function(){document.getElementById('modalBody').innerHTML='<div class="empty-state">Failed to load.</div>';});
@@ -2179,7 +2258,8 @@ function toggleFullBody(){
 }
 function modalApprove(){
     if(!currentModalId)return;
-    var edits={doc_type:document.getElementById('modalDocType').value,discipline:document.getElementById('modalDiscipline').value,assigned_to:document.getElementById('modalAssignedTo').value};
+    var ackEl=document.getElementById('modalAckRequired');
+    var edits={doc_type:document.getElementById('modalDocType').value,discipline:document.getElementById('modalDiscipline').value,assigned_to:document.getElementById('modalAssignedTo').value,acknowledgment_required:ackEl?ackEl.checked:false};
     fetch('/api/pending/'+currentModalId+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(edits)})
     .then(function(r){return r.json();}).then(function(d){
         if(d.error){showToast(d.error,'error');return;}
@@ -2275,6 +2355,8 @@ function renderProcessedTable(){
         html+='<span>'+fmtTime(e.processed_at)+'</span>';
         if(e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
         if(e.response_required) html+='<span class="resp-yes">Response needed</span>';
+        if(e.acknowledgment_sent_at) html+='<span style="color:var(--success);font-size:11px">Ack sent</span>';
+        else if(e.acknowledgment_required) html+='<span style="color:var(--warn);font-size:11px">Ack pending</span>';
         html+='</div>';
         var procCc=fmtRecipientsShort(e.cc_recipients);
         if(procCc) html+='<div class="card-meta"><span class="cc-label">CC:</span> <span>'+procCc+'</span></div>';
@@ -2305,7 +2387,7 @@ function renderProcessedTable(){
     var exp=viewModes.processed==='expanded'?' table-expanded':'';
     html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
         '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>CC</th><th>Subject</th>'+
-        '<th>Type</th><th>Discipline</th><th>Assigned To</th><th>Resp.</th><th>Att.</th></tr></thead><tbody>';
+        '<th>Type</th><th>Discipline</th><th>Assigned To</th><th>Resp.</th><th>Ack</th><th>Att.</th></tr></thead><tbody>';
     for(var i=0;i<items.length;i++){
         var e=items[i], idx=page*perPage+i+1;
         var fups=e.follow_ups||[];
@@ -2322,7 +2404,9 @@ function renderProcessedTable(){
             '<td class="col-cc" title="'+esc(fmtRecipientsTitle(e.cc_recipients))+'">'+procCcShort+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
             '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.assigned_to||'')+'</td>'+
-            '<td><span class="'+rc+'">'+rt+'</span></td><td id="proc-att-'+esc(e.message_id)+'">'+(e.attachment_count||0)+'</td></tr>';
+            '<td><span class="'+rc+'">'+rt+'</span></td>'+
+            '<td>'+(e.acknowledgment_sent_at?'<span style="color:var(--success)" title="Sent '+esc(e.acknowledgment_sent_at||'')+'">&#10003;</span>':(e.acknowledgment_required?'<span style="color:var(--warn)">Pending</span>':''))+'</td>'+
+            '<td id="proc-att-'+esc(e.message_id)+'">'+(e.attachment_count||0)+'</td></tr>';
         // Follow-up rows (hidden by default)
         for(var fi=0;fi<fups.length;fi++){
             var fu=fups[fi];
@@ -2546,10 +2630,14 @@ function renderKPIs(counts, attn){
     document.getElementById('kpiProcessed').textContent = counts.total_processed;
     document.getElementById('kpiConversations').textContent = counts.active_conversations;
     document.getElementById('kpiAutoApproved').textContent = counts.auto_approved || 0;
+    document.getElementById('kpiOverdue').textContent = counts.overdue_responses || 0;
     document.getElementById('kpiRejected').textContent = counts.rejected;
     // Color pending red if > 0, green if 0
     var pendEl = document.getElementById('kpiPending');
     pendEl.className = 'kpi-value' + (counts.pending_review > 0 ? ' text-danger' : ' text-success');
+    // Color overdue red if > 0
+    var overdueEl = document.getElementById('kpiOverdue');
+    overdueEl.className = 'kpi-value' + ((counts.overdue_responses || 0) > 0 ? ' text-danger' : ' text-success');
 }
 
 function renderAttentionCard(attn){
@@ -2567,6 +2655,13 @@ function renderAttentionCard(attn){
     addItems(attn.stale, 'dot-amber', '48h+' + (attn.stale_count > 10 ? ' (' + attn.stale_count + ')' : ''));
     addItems(attn.response_required, 'dot-purple', 'Resp. Req.' + (attn.response_required_count > 10 ? ' (' + attn.response_required_count + ')' : ''));
     addItems(attn.low_confidence, 'dot-gray', 'Low Conf.' + (attn.low_confidence_count > 10 ? ' (' + attn.low_confidence_count + ')' : ''));
+    // Overdue responses (from processed_messages, use transmittal_no as id for uniqueness)
+    if(attn.overdue_responses && attn.overdue_responses.length){
+        for(var oi=0;oi<attn.overdue_responses.length;oi++){
+            var od=attn.overdue_responses[oi];
+            items.push({item:{id:'overdue-'+oi, subject: od.subject||'(no subject)'}, dotClass:'dot-orange', label:'Overdue'+(attn.overdue_responses_count>10?' ('+attn.overdue_responses_count+')':'')});
+        }
+    }
 
     if(items.length === 0){
         list.innerHTML = '<li class="attn-empty">Nothing needs attention right now.</li>';
@@ -2577,7 +2672,8 @@ function renderAttentionCard(attn){
         var it = items[i];
         var subj = (it.item.subject || '(no subject)');
         if(subj.length > 55) subj = subj.substring(0, 55) + '...';
-        html += '<li class="attn-item" onclick="openDetailModal(' + it.item.id + ')" title="' + (it.item.subject||'').replace(/"/g,'&quot;') + '">' +
+        var clickAttr = (typeof it.item.id === 'number') ? ' onclick="openDetailModal(' + it.item.id + ')"' : '';
+        html += '<li class="attn-item"' + clickAttr + ' title="' + (it.item.subject||'').replace(/"/g,'&quot;') + '">' +
             '<span class="attn-dot ' + it.dotClass + '"></span>' +
             '<span>' + subj.replace(/</g,'&lt;') + '</span>' +
             '<span class="attn-label">' + it.label + '</span></li>';
@@ -2782,6 +2878,82 @@ function saveAutoSettings(){
         st.textContent='Saved';st.style.color='var(--success)';
         setTimeout(function(){st.textContent='';},2000);
     }).catch(function(){showToast('Failed to save','error');});
+}
+
+// ---- Email Sending Settings ----
+function toggleEmailSettings(){
+    var body=document.getElementById('emailSettingsBody');
+    var tog=document.getElementById('emailSettingsToggle');
+    if(body.style.display==='none'){body.style.display='block';tog.innerHTML='&#9650;';fetchEmailSettings();fetchEmailTemplates();}
+    else{body.style.display='none';tog.innerHTML='&#9660;';}
+}
+function fetchEmailSettings(){
+    fetch('/api/settings/smtp').then(function(r){return r.json();}).then(function(d){
+        var badge=document.getElementById('smtpStatusBadge');
+        if(d.smtp_configured){
+            badge.textContent='Configured';badge.style.background='#dcfce7';badge.style.color='#166534';
+        } else {
+            badge.textContent='Not configured';badge.style.background='#fef3c7';badge.style.color='#92400e';
+        }
+        document.getElementById('smtpHostInfo').textContent=d.smtp_host?d.smtp_host+':'+d.smtp_port:'';
+        document.getElementById('smtpEnabledCb').checked=d.smtp_enabled;
+        document.getElementById('ackEnabledCb').checked=d.ack_enabled;
+        document.getElementById('reminderEnabledCb').checked=d.reminder_enabled;
+    }).catch(function(){});
+    fetch('/api/settings/reminders').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('reminderDays').value=d.reminder_days||3;
+        document.getElementById('reminderDaysVal').textContent=d.reminder_days||3;
+        document.getElementById('reminderMax').value=d.reminder_max_count||3;
+        document.getElementById('reminderMaxVal').textContent=d.reminder_max_count||3;
+    }).catch(function(){});
+}
+function fetchEmailTemplates(){
+    fetch('/api/settings/email-templates').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('ackTplSubject').value=d.ack_template_subject||'';
+        document.getElementById('ackTplBody').value=d.ack_template_body||'';
+        document.getElementById('reminderTplSubject').value=d.reminder_template_subject||'';
+        document.getElementById('reminderTplBody').value=d.reminder_template_body||'';
+    }).catch(function(){});
+}
+function saveEmailSettings(){
+    var data={
+        smtp_enabled:document.getElementById('smtpEnabledCb').checked,
+        ack_enabled:document.getElementById('ackEnabledCb').checked,
+        reminder_enabled:document.getElementById('reminderEnabledCb').checked,
+        reminder_days:parseInt(document.getElementById('reminderDays').value),
+        reminder_max_count:parseInt(document.getElementById('reminderMax').value)
+    };
+    fetch('/api/settings/reminders',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        var st=document.getElementById('emailSettingsStatus');
+        st.textContent='Saved';st.style.color='var(--success)';
+        setTimeout(function(){st.textContent='';},2000);
+    }).catch(function(){showToast('Failed to save','error');});
+}
+function saveEmailTemplates(){
+    var data={
+        ack_template_subject:document.getElementById('ackTplSubject').value,
+        ack_template_body:document.getElementById('ackTplBody').value,
+        reminder_template_subject:document.getElementById('reminderTplSubject').value,
+        reminder_template_body:document.getElementById('reminderTplBody').value
+    };
+    fetch('/api/settings/email-templates',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        var st=document.getElementById('emailSettingsStatus');
+        st.textContent='Templates saved';st.style.color='var(--success)';
+        setTimeout(function(){st.textContent='';},2000);
+    }).catch(function(){showToast('Failed to save templates','error');});
+}
+function testSmtp(){
+    var to=prompt('Send test email to:');
+    if(!to)return;
+    fetch('/api/settings/smtp/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to_address:to})})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast('SMTP test failed: '+d.error,'error');}
+        else showToast('Test email sent!','success');
+    }).catch(function(){showToast('SMTP test failed','error');});
 }
 
 // ---- Suggested Contacts ----

@@ -36,6 +36,15 @@ attachments:
 excel:
   output_path: "logs/correspondence_log.xlsx"
 
+# SMTP Settings (for sending acknowledgments and reminders)
+# Reuses IMAP auth credentials by default. Override with env vars: SMTP_HOST, SMTP_PORT, SMTP_USE_TLS
+smtp:
+  enabled: false
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  use_tls: true
+  from_name: "Document Control"
+
 # Logging
 logging:
   log_file: "logs/email_interface.log"

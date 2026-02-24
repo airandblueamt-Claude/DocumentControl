@@ -55,12 +55,13 @@ class ClassificationResult:
     __slots__ = (
         'in_scope', 'doc_type', 'discipline', 'department',
         'response_required', 'references', 'confidence',
-        'summary', 'priority',
+        'summary', 'priority', 'acknowledgment_required',
     )
 
     def __init__(self, in_scope=True, doc_type='Others', discipline='General',
                  department='', response_required=False, references=None,
-                 confidence=1.0, summary='', priority='medium'):
+                 confidence=1.0, summary='', priority='medium',
+                 acknowledgment_required=False):
         self.in_scope = in_scope
         self.doc_type = doc_type
         self.discipline = discipline
@@ -70,6 +71,7 @@ class ClassificationResult:
         self.confidence = confidence
         self.summary = summary
         self.priority = priority
+        self.acknowledgment_required = acknowledgment_required
 
     def to_dict(self):
         return {
@@ -82,6 +84,7 @@ class ClassificationResult:
             'confidence': self.confidence,
             'summary': self.summary,
             'priority': self.priority,
+            'acknowledgment_required': self.acknowledgment_required,
         }
 
 
@@ -255,6 +258,9 @@ class RuleBasedClassifier(EmailClassifier):
         for regex in self.ref_regexes:
             references.extend(regex.findall(full_text))
 
+        # Acknowledgment required — if email has document attachments
+        acknowledgment_required = self._has_doc_attachments(msg_data)
+
         return ClassificationResult(
             in_scope=True,
             doc_type=doc_type,
@@ -263,6 +269,7 @@ class RuleBasedClassifier(EmailClassifier):
             response_required=response_required,
             references=references,
             confidence=1.0,
+            acknowledgment_required=acknowledgment_required,
         )
 
     def classify_full(self, msg_data):
@@ -394,6 +401,7 @@ class LLMClassifierBase(EmailClassifier):
             '  "discipline": "one of the valid disciplines above",\n'
             '  "department": "one of the valid departments above or empty string",\n'
             '  "response_required": true or false,\n'
+            '  "acknowledgment_required": true or false (true if this is a document submission that warrants a receipt confirmation),\n'
             '  "references": ["any reference numbers found"],\n'
             '  "confidence": 0.0 to 1.0\n'
             "}"
@@ -482,6 +490,7 @@ class LLMClassifierBase(EmailClassifier):
             '  "discipline": "one of the valid disciplines above (or empty if out of scope)",\n'
             '  "department": "one of the valid departments above or empty string",\n'
             '  "response_required": true or false,\n'
+            '  "acknowledgment_required": true or false (true if this is a document submission that warrants a receipt confirmation),\n'
             '  "references": ["any reference numbers found"],\n'
             '  "confidence": 0.0 to 1.0,\n'
             '  "summary": "1-2 sentence summary of what this email is about",\n'
@@ -503,6 +512,7 @@ class LLMClassifierBase(EmailClassifier):
             discipline=data.get('discipline', 'General') if in_scope else '',
             department=data.get('department', ''),
             response_required=bool(data.get('response_required', False)),
+            acknowledgment_required=bool(data.get('acknowledgment_required', False)),
             references=data.get('references', []),
             confidence=float(data.get('confidence', 0.8)),
             summary=data.get('summary', ''),
@@ -521,13 +531,15 @@ class LLMClassifierBase(EmailClassifier):
                 "discipline": {"type": "string", "enum": disciplines},
                 "department": {"type": "string"},
                 "response_required": {"type": "boolean"},
+                "acknowledgment_required": {"type": "boolean"},
                 "references": {"type": "array", "items": {"type": "string"}},
                 "confidence": {"type": "number"},
                 "summary": {"type": "string"},
                 "priority": {"type": "string", "enum": ["high", "medium", "low"]},
             },
             "required": ["in_scope", "doc_type", "discipline", "department",
-                         "response_required", "references", "confidence",
+                         "response_required", "acknowledgment_required",
+                         "references", "confidence",
                          "summary", "priority"],
         }
 
@@ -570,6 +582,7 @@ class LLMClassifierBase(EmailClassifier):
             '    "in_scope": true or false,\n'
             '    "doc_type": "...", "discipline": "...", "department": "...",\n'
             '    "response_required": true or false,\n'
+            '    "acknowledgment_required": true or false,\n'
             '    "references": ["..."],\n'
             '    "confidence": 0.0 to 1.0,\n'
             '    "summary": "1-2 sentence summary",\n'
@@ -602,6 +615,7 @@ class LLMClassifierBase(EmailClassifier):
                 discipline=item.get('discipline', 'General') if in_scope else '',
                 department=item.get('department', ''),
                 response_required=bool(item.get('response_required', False)),
+                acknowledgment_required=bool(item.get('acknowledgment_required', False)),
                 references=item.get('references', []),
                 confidence=float(item.get('confidence', 0.8)),
                 summary=item.get('summary', ''),
@@ -630,6 +644,7 @@ class LLMClassifierBase(EmailClassifier):
             discipline=data.get('discipline', 'General'),
             department=data.get('department', ''),
             response_required=bool(data.get('response_required', False)),
+            acknowledgment_required=bool(data.get('acknowledgment_required', False)),
             references=data.get('references', []),
             confidence=float(data.get('confidence', 0.8)),
         )

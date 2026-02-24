@@ -489,7 +489,7 @@ def _query_counts(conn):
     counts = {'pending_review': 0, 'approved': 0, 'rejected': 0,
               'out_of_scope': 0, 'total_processed': 0,
               'active_conversations': 0, 'response_required_pending': 0,
-              'auto_approved': 0}
+              'auto_approved': 0, 'overdue_responses': 0}
     try:
         for row in conn.execute("SELECT status, COUNT(*) FROM pending_emails GROUP BY status"):
             counts[row[0]] = row[1]
@@ -504,6 +504,16 @@ def _query_counts(conn):
         try:
             counts['auto_approved'] = conn.execute(
                 "SELECT COUNT(*) FROM pending_emails WHERE auto_approved = 1"
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
+        try:
+            counts['overdue_responses'] = conn.execute(
+                """SELECT COUNT(*) FROM processed_messages
+                   WHERE response_required = 1
+                     AND response_received = 0
+                     AND response_due_date IS NOT NULL
+                     AND response_due_date < datetime('now')"""
             ).fetchone()[0]
         except sqlite3.OperationalError:
             pass
@@ -538,7 +548,9 @@ def _query_time_series(conn, today, week_start, month_start):
 def _query_attention_needed(conn):
     """Lists of emails needing attention (max 10 each) plus total counts."""
     attn = {'high_priority': [], 'stale': [], 'response_required': [], 'low_confidence': [],
-            'high_priority_count': 0, 'stale_count': 0, 'response_required_count': 0, 'low_confidence_count': 0}
+            'overdue_responses': [],
+            'high_priority_count': 0, 'stale_count': 0, 'response_required_count': 0,
+            'low_confidence_count': 0, 'overdue_responses_count': 0}
     fields = "id, subject, sender, sender_name, scanned_at, department, ai_priority, confidence"
     try:
         attn['high_priority_count'] = conn.execute(
@@ -572,6 +584,24 @@ def _query_attention_needed(conn):
             f"SELECT {fields} FROM pending_emails WHERE status = 'pending_review' AND confidence IS NOT NULL AND confidence < 0.5 ORDER BY confidence ASC LIMIT 10"
         ):
             attn['low_confidence'].append(dict(row))
+
+        # Overdue responses (from processed_messages)
+        try:
+            attn['overdue_responses_count'] = conn.execute(
+                """SELECT COUNT(*) FROM processed_messages
+                   WHERE response_required = 1 AND response_received = 0
+                     AND response_due_date IS NOT NULL AND response_due_date < datetime('now')"""
+            ).fetchone()[0]
+            overdue_fields = "message_id, transmittal_no, subject, sender, sender_name, processed_at, response_due_date, reminder_count"
+            for row in conn.execute(
+                f"""SELECT {overdue_fields} FROM processed_messages
+                    WHERE response_required = 1 AND response_received = 0
+                      AND response_due_date IS NOT NULL AND response_due_date < datetime('now')
+                    ORDER BY response_due_date ASC LIMIT 10"""
+            ):
+                attn['overdue_responses'].append(dict(row))
+        except sqlite3.OperationalError:
+            pass
     except sqlite3.OperationalError:
         pass
     return attn
@@ -858,6 +888,8 @@ def api_emails():
             f"""SELECT pm.transmittal_no, pm.processed_at, pm.sender, pm.sender_name,
                       pm.to_recipients, pm.cc_recipients, pm.subject, pm.attachment_count,
                       pm.doc_type, pm.discipline, pm.department, pm.response_required,
+                      pm.acknowledgment_required, pm.acknowledgment_sent_at,
+                      pm.response_due_date, pm.response_received, pm.reminder_count,
                       pm.references_json, pm.conversation_id, pm.message_id,
                       pe.classifier_method, pe.auto_approved,
                       pm.assigned_to
@@ -1991,7 +2023,8 @@ def api_export_excel():
             """SELECT pm.transmittal_no, pm.processed_at, pm.sender,
                       pm.to_recipients, pm.cc_recipients, pm.subject,
                       pm.references_json, pm.doc_type, pm.discipline,
-                      pm.response_required, pm.attachment_count,
+                      pm.response_required, pm.acknowledgment_required,
+                      pm.attachment_count,
                       pm.message_id, pe.attachment_folder, pm.assigned_to
                FROM processed_messages pm
                LEFT JOIN pending_emails pe ON pm.message_id = pe.message_id
@@ -2036,6 +2069,7 @@ def api_export_excel():
             row['doc_type'] or '',
             row['discipline'] or '',
             'Y' if row['response_required'] else 'N',
+            'Y' if row['acknowledgment_required'] else 'N',
             row['attachment_count'] or 0,
             row['attachment_folder'] or '',
             row['assigned_to'] or '',
@@ -2085,6 +2119,207 @@ def api_team_members():
         tracker.close()
 
 
+# --- SMTP / Acknowledgment / Reminder API Routes ---
+
+@app.route('/api/settings/smtp')
+def api_smtp_settings():
+    """Return SMTP config status (not passwords)."""
+    tracker = _get_tracker()
+    try:
+        from email_interface.config import load_config, resolve_path
+        email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
+        smtp = email_cfg.get('smtp', {})
+        smtp_host = os.environ.get('SMTP_HOST', smtp.get('smtp_host', ''))
+        return jsonify({
+            'smtp_configured': bool(smtp_host),
+            'smtp_host': smtp_host,
+            'smtp_port': int(os.environ.get('SMTP_PORT', smtp.get('smtp_port', 587))),
+            'smtp_enabled': tracker.get_setting('smtp_enabled') == 'true',
+            'ack_enabled': tracker.get_setting('ack_enabled') == 'true',
+            'reminder_enabled': tracker.get_setting('reminder_enabled') == 'true',
+        })
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/smtp/test', methods=['POST'])
+def api_smtp_test():
+    """Send a test email to verify SMTP works."""
+    data = request.get_json(silent=True) or {}
+    to_address = data.get('to_address', '')
+    if not to_address:
+        return jsonify({'error': 'to_address required'}), 400
+    from email_interface.smtp_sender import send_email
+    result = send_email(BASE_DIR, to_address,
+                        'Document Control - SMTP Test',
+                        'This is a test email from Document Control to verify SMTP configuration.')
+    if result['success']:
+        return jsonify({'message': 'Test email sent successfully'})
+    return jsonify({'error': result['error']}), 500
+
+
+@app.route('/api/settings/email-templates', methods=['GET'])
+def api_get_email_templates():
+    """Return acknowledgment and reminder email templates."""
+    tracker = _get_tracker()
+    try:
+        from email_interface.smtp_sender import (
+            DEFAULT_ACK_SUBJECT, DEFAULT_ACK_BODY,
+            DEFAULT_REMINDER_SUBJECT, DEFAULT_REMINDER_BODY,
+        )
+        return jsonify({
+            'ack_template_subject': tracker.get_setting('ack_template_subject') or DEFAULT_ACK_SUBJECT,
+            'ack_template_body': tracker.get_setting('ack_template_body') or DEFAULT_ACK_BODY,
+            'reminder_template_subject': tracker.get_setting('reminder_template_subject') or DEFAULT_REMINDER_SUBJECT,
+            'reminder_template_body': tracker.get_setting('reminder_template_body') or DEFAULT_REMINDER_BODY,
+        })
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/email-templates', methods=['PUT'])
+def api_set_email_templates():
+    """Save acknowledgment and reminder email templates."""
+    data = request.get_json(silent=True) or {}
+    tracker = _get_tracker()
+    try:
+        for key in ('ack_template_subject', 'ack_template_body',
+                     'reminder_template_subject', 'reminder_template_body'):
+            if key in data:
+                tracker.set_setting(key, data[key])
+        return jsonify({'message': 'Templates saved'})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/reminders', methods=['GET'])
+def api_get_reminder_settings():
+    """Return reminder settings."""
+    tracker = _get_tracker()
+    try:
+        return jsonify({
+            'reminder_enabled': tracker.get_setting('reminder_enabled') == 'true',
+            'reminder_days': int(tracker.get_setting('reminder_days') or '3'),
+            'reminder_max_count': int(tracker.get_setting('reminder_max_count') or '3'),
+            'smtp_enabled': tracker.get_setting('smtp_enabled') == 'true',
+            'ack_enabled': tracker.get_setting('ack_enabled') == 'true',
+        })
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/reminders', methods=['PUT'])
+def api_set_reminder_settings():
+    """Update reminder and SMTP/ack enable settings."""
+    data = request.get_json(silent=True) or {}
+    tracker = _get_tracker()
+    try:
+        if 'smtp_enabled' in data:
+            tracker.set_setting('smtp_enabled', 'true' if data['smtp_enabled'] else 'false')
+        if 'ack_enabled' in data:
+            tracker.set_setting('ack_enabled', 'true' if data['ack_enabled'] else 'false')
+        if 'reminder_enabled' in data:
+            tracker.set_setting('reminder_enabled', 'true' if data['reminder_enabled'] else 'false')
+        if 'reminder_days' in data:
+            tracker.set_setting('reminder_days', str(int(data['reminder_days'])))
+        if 'reminder_max_count' in data:
+            tracker.set_setting('reminder_max_count', str(int(data['reminder_max_count'])))
+        return jsonify({'message': 'Settings saved'})
+    except (ValueError, TypeError) as e:
+        return jsonify({'error': f'Invalid value: {e}'}), 400
+    finally:
+        tracker.close()
+
+
+@app.route('/api/overdue')
+def api_overdue():
+    """List overdue response items."""
+    tracker = _get_tracker()
+    try:
+        days = int(request.args.get('days', 0))
+        items = tracker.get_overdue_responses(days)
+        return jsonify({'items': items, 'count': len(items)})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/overdue/<path:msg_id>/mark-responded', methods=['POST'])
+def api_mark_responded(msg_id):
+    """Mark a processed message as having received a response."""
+    tracker = _get_tracker()
+    try:
+        tracker.mark_response_received(msg_id)
+        return jsonify({'message': 'Marked as responded'})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/overdue/<path:msg_id>/send-reminder', methods=['POST'])
+def api_send_reminder(msg_id):
+    """Manually send a reminder for an overdue item."""
+    tracker = _get_tracker()
+    try:
+        # Find the processed message
+        tracker._conn.row_factory = sqlite3.Row
+        cur = tracker._conn.execute(
+            "SELECT * FROM processed_messages WHERE message_id = ?", (msg_id,))
+        row = cur.fetchone()
+        tracker._conn.row_factory = None
+        if not row:
+            return jsonify({'error': 'Message not found'}), 404
+        msg = dict(row)
+        from email_interface.smtp_sender import send_reminder
+        result = send_reminder(BASE_DIR, tracker, msg)
+        if result['success']:
+            return jsonify({'message': 'Reminder sent'})
+        return jsonify({'error': result['error']}), 500
+    finally:
+        tracker.close()
+
+
+@app.route('/api/sent-emails')
+def api_sent_emails():
+    """Return sent email log."""
+    tracker = _get_tracker()
+    try:
+        transmittal_no = request.args.get('transmittal_no')
+        email_type = request.args.get('type')
+        limit = int(request.args.get('limit', 50))
+        items = tracker.get_sent_emails(transmittal_no, email_type, limit)
+        return jsonify({'items': items})
+    finally:
+        tracker.close()
+
+
+def run_reminder_check():
+    """Scheduled job: send reminders for overdue responses."""
+    tracker = _get_tracker()
+    try:
+        if tracker.get_setting('reminder_enabled') != 'true':
+            return
+        if tracker.get_setting('smtp_enabled') != 'true':
+            return
+
+        days = int(tracker.get_setting('reminder_days') or '3')
+        max_count = int(tracker.get_setting('reminder_max_count') or '3')
+
+        overdue = tracker.get_overdue_responses(days)
+        sent = 0
+        for msg in overdue:
+            if (msg.get('reminder_count') or 0) >= max_count:
+                continue
+            from email_interface.smtp_sender import send_reminder
+            result = send_reminder(BASE_DIR, tracker, msg)
+            if result['success']:
+                sent += 1
+        if sent:
+            logger.info("Reminder check: sent %d reminders for %d overdue items", sent, len(overdue))
+    except Exception as e:
+        logger.error("Reminder check failed: %s", e)
+    finally:
+        tracker.close()
+
+
 # --- Scheduler ---
 
 def start_scheduler():
@@ -2099,6 +2334,13 @@ def start_scheduler():
         'interval',
         minutes=interval,
         id='email_scan',
+        next_run_time=None,  # Don't run immediately on startup
+    )
+    scheduler.add_job(
+        run_reminder_check,
+        'interval',
+        hours=12,
+        id='reminder_check',
         next_run_time=None,  # Don't run immediately on startup
     )
     scheduler.start()

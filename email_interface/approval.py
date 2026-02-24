@@ -151,6 +151,7 @@ def _log_to_excel(pe, transmittal_no, saved_files, base_dir):
         'doc_type': pe.get('doc_type', ''),
         'discipline': pe.get('discipline', ''),
         'response_required': pe.get('response_required'),
+        'acknowledgment_required': pe.get('acknowledgment_required'),
         'attachments': [{}] * pe.get('attachment_count', 0),
         'attachments_saved': saved_files,
         'assigned_to': pe.get('assigned_to', ''),
@@ -245,6 +246,14 @@ def perform_full_approval(tracker, pending_id, base_dir, edits=None):
 
     # 7. Auto-learn contact if threshold met
     _maybe_auto_learn_contact(tracker, pe)
+
+    # 8. Send acknowledgment if required and enabled
+    if pe.get('acknowledgment_required'):
+        try:
+            from email_interface.smtp_sender import send_acknowledgment
+            send_acknowledgment(base_dir, tracker, pe, transmittal_no)
+        except Exception as e:
+            logger.warning("Ack send failed for %s: %s", transmittal_no, e)
 
     return {
         'transmittal_no': transmittal_no,

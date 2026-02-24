@@ -134,8 +134,22 @@ CREATE INDEX IF NOT EXISTS idx_pending_scanned_at ON pending_emails(scanned_at);
 CREATE INDEX IF NOT EXISTS idx_pending_conversation ON pending_emails(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_processed_conversation ON processed_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conv_norm_subject ON conversations(normalized_subject);
+CREATE TABLE IF NOT EXISTS sent_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT,
+    transmittal_no TEXT,
+    recipient TEXT NOT NULL,
+    email_type TEXT NOT NULL,
+    subject TEXT,
+    body TEXT,
+    sent_at TIMESTAMP,
+    status TEXT DEFAULT 'sent',
+    error_message TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_projects_number ON projects(project_number);
 CREATE INDEX IF NOT EXISTS idx_projects_year ON projects(year);
+CREATE INDEX IF NOT EXISTS idx_sent_emails_transmittal ON sent_emails(transmittal_no);
 """
 
 # Columns added after initial schema - handled via migration
@@ -163,6 +177,14 @@ _MIGRATIONS = [
     ("contacts", "role", "TEXT"),
     ("pending_emails", "assigned_to", "TEXT"),
     ("processed_messages", "assigned_to", "TEXT"),
+    ("pending_emails", "acknowledgment_required", "INTEGER DEFAULT 0"),
+    ("processed_messages", "acknowledgment_required", "INTEGER DEFAULT 0"),
+    ("pending_emails", "acknowledgment_sent_at", "TIMESTAMP"),
+    ("processed_messages", "acknowledgment_sent_at", "TIMESTAMP"),
+    ("processed_messages", "reminder_sent_at", "TIMESTAMP"),
+    ("processed_messages", "reminder_count", "INTEGER DEFAULT 0"),
+    ("processed_messages", "response_received", "INTEGER DEFAULT 0"),
+    ("processed_messages", "response_due_date", "TIMESTAMP"),
 ]
 
 
@@ -287,8 +309,8 @@ class ProcessingTracker:
                 references_json, attachment_count, classifier_method, confidence,
                 body_html, in_reply_to, email_references,
                 conversation_id, conversation_position,
-                ai_summary, ai_priority)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ai_summary, ai_priority, acknowledgment_required)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_data.get('message_id', ''),
                 status,
@@ -315,6 +337,7 @@ class ProcessingTracker:
                 msg_data.get('conversation_position', 1),
                 classification.get('summary', ''),
                 classification.get('priority', 'medium'),
+                1 if classification.get('acknowledgment_required') else 0,
             ),
         )
         self._conn.commit()
@@ -339,6 +362,7 @@ class ProcessingTracker:
             """SELECT id, message_id, status, scanned_at, sender, sender_name,
                       to_recipients, cc_recipients, subject, email_date,
                       doc_type, discipline, department, response_required,
+                      acknowledgment_required,
                       references_json, attachment_count, transmittal_no,
                       classifier_method, confidence,
                       conversation_id, conversation_position,
@@ -416,6 +440,8 @@ class ProcessingTracker:
             for key in ('doc_type', 'discipline', 'department', 'assigned_to'):
                 if key in edits and edits[key] is not None:
                     pe[key] = edits[key]
+            if 'acknowledgment_required' in edits:
+                pe['acknowledgment_required'] = 1 if edits['acknowledgment_required'] else 0
 
         # Generate transmittal number
         email_date = None
@@ -428,13 +454,19 @@ class ProcessingTracker:
         transmittal_no = self.get_next_transmittal_number(email_date)
 
         # Copy to processed_messages (with full classification)
+        # Set response_due_date if response is required
+        response_due = None
+        if pe.get('response_required'):
+            from datetime import timedelta
+            response_due = (datetime.now() + timedelta(days=3)).isoformat()
+
         self._conn.execute(
             """INSERT OR IGNORE INTO processed_messages
                (message_id, transmittal_no, processed_at, sender, sender_name,
                 to_recipients, cc_recipients, subject, attachment_count,
                 doc_type, discipline, department, response_required, references_json,
-                conversation_id, assigned_to)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                conversation_id, assigned_to, acknowledgment_required, response_due_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 pe['message_id'],
                 transmittal_no,
@@ -452,6 +484,8 @@ class ProcessingTracker:
                 pe.get('references_json', '[]'),
                 pe.get('conversation_id'),
                 pe.get('assigned_to', ''),
+                pe.get('acknowledgment_required', 0),
+                response_due,
             ),
         )
 
@@ -915,6 +949,103 @@ class ProcessingTracker:
             (key, value, datetime.now().isoformat()),
         )
         self._conn.commit()
+
+    # --- Sent Emails / Acknowledgment / Reminder Tracking ---
+
+    def log_sent_email(self, message_id, transmittal_no, recipient, email_type,
+                       subject, body, status='sent', error=None):
+        """Log a sent email (acknowledgment or reminder)."""
+        self._conn.execute(
+            """INSERT INTO sent_emails
+               (message_id, transmittal_no, recipient, email_type, subject, body,
+                sent_at, status, error_message)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (message_id, transmittal_no, recipient, email_type, subject, body,
+             datetime.now().isoformat(), status, error),
+        )
+        self._conn.commit()
+
+    def get_sent_emails(self, transmittal_no=None, email_type=None, limit=50):
+        """Get sent email log with optional filters."""
+        self._conn.row_factory = sqlite3.Row
+        query = "SELECT * FROM sent_emails WHERE 1=1"
+        params = []
+        if transmittal_no:
+            query += " AND transmittal_no = ?"
+            params.append(transmittal_no)
+        if email_type:
+            query += " AND email_type = ?"
+            params.append(email_type)
+        query += " ORDER BY sent_at DESC LIMIT ?"
+        params.append(limit)
+        cur = self._conn.execute(query, params)
+        rows = [dict(row) for row in cur.fetchall()]
+        self._conn.row_factory = None
+        return rows
+
+    def get_overdue_responses(self, days=3):
+        """Get processed messages requiring a response that are overdue."""
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            """SELECT * FROM processed_messages
+               WHERE response_required = 1
+                 AND response_received = 0
+                 AND response_due_date IS NOT NULL
+                 AND response_due_date < ?
+               ORDER BY response_due_date ASC""",
+            (datetime.now().isoformat(),),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        self._conn.row_factory = None
+        return rows
+
+    def mark_response_received(self, message_id):
+        """Mark a processed message as having received a response."""
+        self._conn.execute(
+            "UPDATE processed_messages SET response_received = 1 WHERE message_id = ?",
+            (message_id,),
+        )
+        self._conn.commit()
+
+    def update_reminder_sent(self, message_id):
+        """Increment reminder_count and set reminder_sent_at."""
+        self._conn.execute(
+            """UPDATE processed_messages
+               SET reminder_count = COALESCE(reminder_count, 0) + 1,
+                   reminder_sent_at = ?
+               WHERE message_id = ?""",
+            (datetime.now().isoformat(), message_id),
+        )
+        self._conn.commit()
+
+    def mark_acknowledgment_sent(self, message_id, pending_id=None):
+        """Set acknowledgment_sent_at on both processed and pending records."""
+        now = datetime.now().isoformat()
+        self._conn.execute(
+            "UPDATE processed_messages SET acknowledgment_sent_at = ? WHERE message_id = ?",
+            (now, message_id),
+        )
+        if pending_id:
+            self._conn.execute(
+                "UPDATE pending_emails SET acknowledgment_sent_at = ? WHERE id = ?",
+                (now, pending_id),
+            )
+        self._conn.commit()
+
+    def get_overdue_stats(self):
+        """Get overdue response counts for dashboard KPI."""
+        try:
+            total = self._conn.execute(
+                """SELECT COUNT(*) FROM processed_messages
+                   WHERE response_required = 1
+                     AND response_received = 0
+                     AND response_due_date IS NOT NULL
+                     AND response_due_date < ?""",
+                (datetime.now().isoformat(),),
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            total = 0
+        return {'overdue_responses': total}
 
     # --- Conversation Threading ---
 
