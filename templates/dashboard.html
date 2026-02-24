@@ -1365,6 +1365,16 @@
     <!-- PROJECTS -->
     <div class="tab-panel" id="tab-projects">
         <div class="container">
+            <!-- Path Settings -->
+            <div class="table-card" style="margin-bottom:16px">
+                <div style="padding:12px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <label style="font-weight:600;font-size:13px;white-space:nowrap">Projects Folder:</label>
+                    <input type="text" id="projectsBasePath" placeholder="e.g. /mnt/z/1.0 Projects" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px;font-family:monospace">
+                    <button class="btn btn-primary btn-sm" onclick="saveProjectsPath()">Save Path</button>
+                    <span id="projPathStatus" style="font-size:12px"></span>
+                </div>
+            </div>
+
             <div class="kpi-row" id="projectKpiRow">
                 <div class="kpi-card border-primary"><div class="kpi-value" id="projKpiTotal">--</div><div class="kpi-label">Total Projects</div></div>
                 <div class="kpi-card border-success"><div class="kpi-value text-success" id="projKpiActive">--</div><div class="kpi-label">Active</div></div>
@@ -2814,6 +2824,9 @@ var currentProjectId = null;
 var projectPage = 0;
 
 function fetchProjects(){
+    // Load path setting
+    fetchProjectsPathSetting();
+    // Load project list
     var params = [];
     var year = document.getElementById('projectYearFilter').value;
     var status = document.getElementById('projectStatusFilter').value;
@@ -2828,6 +2841,39 @@ function fetchProjects(){
         populateYearFilter(d.stats || {});
         renderProjectTable(allProjects);
     }).catch(function(){ showToast('Failed to load projects','error'); });
+}
+
+function fetchProjectsPathSetting(){
+    fetch('/api/projects/settings').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('projectsBasePath').value = d.projects_base_path || '';
+        var st = document.getElementById('projPathStatus');
+        if(!d.projects_base_path){
+            st.textContent = 'Not configured';
+            st.style.color = 'var(--text-muted)';
+        } else if(d.accessible){
+            st.innerHTML = '<span style="color:var(--success)">&#10003; Accessible</span>';
+        } else {
+            st.innerHTML = '<span style="color:var(--warn)">Not accessible (run locally to scan)</span>';
+        }
+    }).catch(function(){});
+}
+
+function saveProjectsPath(){
+    var path = document.getElementById('projectsBasePath').value.trim();
+    fetch('/api/projects/settings',{method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({projects_base_path:path})
+    }).then(function(r){return r.json();}).then(function(d){
+        var st = document.getElementById('projPathStatus');
+        if(!d.projects_base_path){
+            st.textContent = 'Cleared';
+            st.style.color = 'var(--text-muted)';
+        } else if(d.accessible){
+            st.innerHTML = '<span style="color:var(--success)">&#10003; Saved &amp; accessible</span>';
+        } else {
+            st.innerHTML = '<span style="color:var(--warn)">Saved (not accessible from this server)</span>';
+        }
+        showToast('Path saved','success');
+    }).catch(function(){showToast('Failed to save path','error');});
 }
 
 function renderProjectKPIs(stats){

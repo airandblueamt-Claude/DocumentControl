@@ -1651,15 +1651,36 @@ def _count_files_shallow(folder_path):
 
 
 def _get_projects_base():
-    """Get the base path for project folders."""
+    """Get the base path for project folders from settings. Returns None if not configured."""
     tracker = _get_tracker()
     try:
-        custom = tracker.get_setting('projects_base_path')
+        return tracker.get_setting('projects_base_path')
     finally:
         tracker.close()
-    if custom:
-        return custom
-    return os.path.join(BASE_DIR, '1.0 Projects')
+
+
+@app.route('/api/projects/settings', methods=['GET'])
+def api_projects_settings():
+    tracker = _get_tracker()
+    try:
+        path = tracker.get_setting('projects_base_path') or ''
+        accessible = bool(path and os.path.isdir(path))
+        return jsonify({'projects_base_path': path, 'accessible': accessible})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/settings', methods=['PUT'])
+def api_projects_settings_update():
+    data = request.get_json(force=True)
+    path = (data.get('projects_base_path') or '').strip()
+    tracker = _get_tracker()
+    try:
+        tracker.set_setting('projects_base_path', path)
+        accessible = bool(path and os.path.isdir(path))
+        return jsonify({'projects_base_path': path, 'accessible': accessible})
+    finally:
+        tracker.close()
 
 
 @app.route('/api/projects', methods=['GET'])
@@ -1705,6 +1726,10 @@ def api_project_create():
         folder_name += ' - ' + client
 
     base_path = _get_projects_base()
+    if not base_path:
+        return jsonify({'error': 'Projects folder path not configured. Set it in Projects settings.'}), 400
+    if not os.path.isdir(base_path):
+        return jsonify({'error': f'Projects folder not accessible: {base_path}'}), 404
     project_folder = os.path.join(base_path, folder_name)
 
     try:
@@ -1772,8 +1797,10 @@ def api_projects_bulk_scan():
     2. Project folders directly under base path
     """
     base_path = _get_projects_base()
+    if not base_path:
+        return jsonify({'error': 'Projects folder path not configured. Set it in the Projects settings above.'}), 400
     if not os.path.isdir(base_path):
-        return jsonify({'error': f'Projects folder not found: {base_path}'}), 404
+        return jsonify({'error': f'Projects folder not accessible: {base_path}. Make sure you are running locally with access to the NAS/server.'}), 404
 
     tracker = _get_tracker()
     scanned = 0
