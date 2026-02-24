@@ -102,11 +102,40 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_number TEXT NOT NULL,
+    variant TEXT DEFAULT '',
+    client_name TEXT DEFAULT '',
+    year INTEGER,
+    folder_path TEXT UNIQUE NOT NULL,
+    template_type TEXT DEFAULT 'unknown',
+    status TEXT DEFAULT 'active',
+    file_count INTEGER DEFAULT 0,
+    subfolder_json TEXT DEFAULT '{}',
+    notes TEXT DEFAULT '',
+    scanned_at TIMESTAMP,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS document_sequences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    doc_type_code TEXT NOT NULL,
+    last_sequence INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id),
+    UNIQUE(project_id, doc_type_code)
+);
+
 CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_emails(status);
 CREATE INDEX IF NOT EXISTS idx_pending_scanned_at ON pending_emails(scanned_at);
 CREATE INDEX IF NOT EXISTS idx_pending_conversation ON pending_emails(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_processed_conversation ON processed_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conv_norm_subject ON conversations(normalized_subject);
+CREATE INDEX IF NOT EXISTS idx_projects_number ON projects(project_number);
+CREATE INDEX IF NOT EXISTS idx_projects_year ON projects(year);
 """
 
 # Columns added after initial schema - handled via migration
@@ -1162,6 +1191,183 @@ class ProcessingTracker:
         self._conn.commit()
         logger.info("Backfill complete: %d emails assigned to conversations", count)
         return count
+
+    # --- Projects ---
+
+    def get_projects(self, year=None, status=None, search=None):
+        """Get projects with optional filters. ORDER BY year DESC, project_number DESC."""
+        clauses = []
+        params = []
+        if year is not None:
+            clauses.append("year = ?")
+            params.append(year)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if search:
+            clauses.append("(project_number LIKE ? OR client_name LIKE ? OR notes LIKE ?)")
+            like = f"%{search}%"
+            params.extend([like, like, like])
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            f"SELECT * FROM projects{where} ORDER BY year DESC, project_number DESC",
+            params,
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        self._conn.row_factory = None
+        return rows
+
+    def get_project(self, project_id):
+        """Get a single project by id."""
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+        row = cur.fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def add_project(self, project_number, variant='', client_name='', year=None,
+                    folder_path='', template_type='unknown'):
+        """Insert a new project."""
+        now = datetime.now().isoformat()
+        cur = self._conn.execute(
+            """INSERT INTO projects
+               (project_number, variant, client_name, year, folder_path,
+                template_type, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+            (project_number, variant, client_name, year, folder_path,
+             template_type, now, now),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def update_project(self, project_id, **kwargs):
+        """Update project fields dynamically."""
+        allowed = {'project_number', 'variant', 'client_name', 'year', 'folder_path',
+                   'template_type', 'status', 'file_count', 'subfolder_json',
+                   'notes', 'scanned_at'}
+        updates = []
+        params = []
+        for key, val in kwargs.items():
+            if key in allowed:
+                updates.append(f"{key} = ?")
+                params.append(val)
+        if not updates:
+            return
+        updates.append("updated_at = ?")
+        params.append(datetime.now().isoformat())
+        params.append(project_id)
+        self._conn.execute(
+            f"UPDATE projects SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        self._conn.commit()
+
+    def delete_project(self, project_id):
+        """Delete a project and its document sequences."""
+        self._conn.execute("DELETE FROM document_sequences WHERE project_id = ?", (project_id,))
+        self._conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        self._conn.commit()
+
+    def get_project_by_folder(self, folder_path):
+        """Look up a project by unique folder_path."""
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            "SELECT * FROM projects WHERE folder_path = ?", (folder_path,)
+        )
+        row = cur.fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def get_project_stats(self):
+        """Aggregate stats: total, by_year counts, by_status counts, with_coc count."""
+        stats = {'total': 0, 'by_year': {}, 'by_status': {}, 'with_coc': 0, 'total_files': 0}
+        cur = self._conn.execute("SELECT COUNT(*) FROM projects")
+        stats['total'] = cur.fetchone()[0]
+
+        cur = self._conn.execute(
+            "SELECT year, COUNT(*) as cnt FROM projects GROUP BY year ORDER BY year DESC"
+        )
+        for row in cur.fetchall():
+            stats['by_year'][row[0] or 'Unknown'] = row[1]
+
+        cur = self._conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM projects GROUP BY status"
+        )
+        for row in cur.fetchall():
+            stats['by_status'][row[0] or 'unknown'] = row[1]
+
+        cur = self._conn.execute(
+            "SELECT COUNT(*) FROM projects WHERE subfolder_json LIKE '%Cert of Completion%' AND subfolder_json NOT LIKE '%\"count\": 0%'"
+        )
+        stats['with_coc'] = cur.fetchone()[0]
+
+        cur = self._conn.execute("SELECT COALESCE(SUM(file_count), 0) FROM projects")
+        stats['total_files'] = cur.fetchone()[0]
+
+        return stats
+
+    # --- Document Sequences ---
+
+    def get_next_doc_number(self, project_id, doc_type_code):
+        """UPSERT sequence and return formatted doc number like '150229-LTR-003'."""
+        project = self.get_project(project_id)
+        if not project:
+            return None
+        now = datetime.now().isoformat()
+        # UPSERT the sequence
+        self._conn.execute(
+            """INSERT INTO document_sequences (project_id, doc_type_code, last_sequence, updated_at)
+               VALUES (?, ?, 1, ?)
+               ON CONFLICT(project_id, doc_type_code)
+               DO UPDATE SET last_sequence = last_sequence + 1, updated_at = ?""",
+            (project_id, doc_type_code.upper(), now, now),
+        )
+        self._conn.commit()
+        cur = self._conn.execute(
+            "SELECT last_sequence FROM document_sequences WHERE project_id = ? AND doc_type_code = ?",
+            (project_id, doc_type_code.upper()),
+        )
+        seq = cur.fetchone()[0]
+        proj_num = project['project_number'] + (project.get('variant') or '')
+        return f"{proj_num}-{doc_type_code.upper()}-{seq:03d}"
+
+    def get_doc_sequences(self, project_id):
+        """List all sequences for a project."""
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            "SELECT * FROM document_sequences WHERE project_id = ? ORDER BY doc_type_code",
+            (project_id,),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        self._conn.row_factory = None
+        return rows
+
+    def seed_doc_sequences_from_scan(self, project_id, detected):
+        """Set counters from filesystem scan (only if higher than current).
+
+        detected: dict of {doc_type_code: max_sequence_found}
+        """
+        now = datetime.now().isoformat()
+        for code, max_seq in detected.items():
+            code = code.upper()
+            cur = self._conn.execute(
+                "SELECT last_sequence FROM document_sequences WHERE project_id = ? AND doc_type_code = ?",
+                (project_id, code),
+            )
+            row = cur.fetchone()
+            if row:
+                if max_seq > row[0]:
+                    self._conn.execute(
+                        "UPDATE document_sequences SET last_sequence = ?, updated_at = ? WHERE project_id = ? AND doc_type_code = ?",
+                        (max_seq, now, project_id, code),
+                    )
+            else:
+                self._conn.execute(
+                    "INSERT INTO document_sequences (project_id, doc_type_code, last_sequence, updated_at) VALUES (?, ?, ?, ?)",
+                    (project_id, code, max_seq, now),
+                )
+        self._conn.commit()
 
     def close(self):
         self._conn.close()

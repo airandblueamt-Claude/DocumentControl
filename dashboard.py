@@ -1605,6 +1605,347 @@ def api_conversation(conv_id):
         tracker.close()
 
 
+# --- Projects ---
+
+_PROJECT_NAME_RE = re.compile(r'^(\d{6})([A-Za-z]?)\s*[-–]?\s*(.*?)$')
+
+OLD_TEMPLATE = {'Client Confirmation PO', 'Commercial Proposal', 'Cost Sheet',
+                'Invoice', 'Delivery Notes', 'Drawings', 'Letters',
+                'Vendor PO & Delivery & Invoices'}
+NEW_TEMPLATE = {'Client PO - Awarded', 'Commercial Proposal', 'Cost Sheet',
+                'Invoice', 'Delivery Notes', 'Correspondence',
+                'Vendor PO & Quotes', 'Vendor Invoice', 'Cert of Completion'}
+UNIFIED_TEMPLATE = ['Commercial Proposal', 'Cost Sheet', 'Client PO - Awarded',
+                    'Invoice', 'Delivery Notes', 'Correspondence', 'Drawings',
+                    'Vendor PO & Quotes', 'Vendor Invoice', 'Cert of Completion', 'Transmittal']
+JUNK_FILES = {'Thumbs.db', 'desktop.ini', '.DS_Store'}
+_DOC_NAME_RE = re.compile(r'^(\d{6}[A-Za-z]?)-([A-Za-z]+)-(\d+)', re.IGNORECASE)
+
+
+def _detect_template_type(subfolders):
+    """Detect whether a project uses old, new, or mixed template."""
+    sub_set = set(subfolders)
+    old_match = len(sub_set & OLD_TEMPLATE)
+    new_match = len(sub_set & NEW_TEMPLATE)
+    if old_match >= 4 and new_match < 3:
+        return 'old'
+    if new_match >= 4 and old_match < 3:
+        return 'new'
+    if old_match >= 2 and new_match >= 2:
+        return 'mixed'
+    if old_match >= 2 or new_match >= 2:
+        return 'old' if old_match > new_match else 'new'
+    return 'unknown'
+
+
+def _count_files_shallow(folder_path):
+    """Count non-junk files directly in a folder (non-recursive)."""
+    count = 0
+    try:
+        for entry in os.scandir(folder_path):
+            if entry.is_file() and entry.name not in JUNK_FILES:
+                count += 1
+    except OSError:
+        pass
+    return count
+
+
+def _get_projects_base():
+    """Get the base path for project folders."""
+    tracker = _get_tracker()
+    try:
+        custom = tracker.get_setting('projects_base_path')
+    finally:
+        tracker.close()
+    if custom:
+        return custom
+    return os.path.join(BASE_DIR, '1.0 Projects')
+
+
+@app.route('/api/projects', methods=['GET'])
+def api_projects_list():
+    tracker = _get_tracker()
+    try:
+        year = request.args.get('year', type=int)
+        status = request.args.get('status')
+        search = request.args.get('search')
+        projects = tracker.get_projects(year=year, status=status, search=search)
+        stats = tracker.get_project_stats()
+        return jsonify({'projects': projects, 'stats': stats})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/<int:project_id>', methods=['GET'])
+def api_project_detail(project_id):
+    tracker = _get_tracker()
+    try:
+        project = tracker.get_project(project_id)
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+        project['doc_sequences'] = tracker.get_doc_sequences(project_id)
+        return jsonify(project)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects', methods=['POST'])
+def api_project_create():
+    data = request.get_json(force=True)
+    number = (data.get('project_number') or '').strip()
+    client = (data.get('client_name') or '').strip()
+    year = data.get('year')
+    variant = (data.get('variant') or '').strip()
+    if not number:
+        return jsonify({'error': 'Project number is required'}), 400
+
+    # Build folder name and create on disk
+    folder_name = number + variant
+    if client:
+        folder_name += ' - ' + client
+
+    base_path = _get_projects_base()
+    project_folder = os.path.join(base_path, folder_name)
+
+    try:
+        os.makedirs(project_folder, exist_ok=True)
+        # Create unified template subfolders
+        for sub in UNIFIED_TEMPLATE:
+            os.makedirs(os.path.join(project_folder, sub), exist_ok=True)
+    except OSError as e:
+        return jsonify({'error': f'Failed to create folders: {e}'}), 500
+
+    tracker = _get_tracker()
+    try:
+        existing = tracker.get_project_by_folder(project_folder)
+        if existing:
+            return jsonify({'error': 'Project folder already exists in database'}), 409
+        pid = tracker.add_project(
+            project_number=number, variant=variant, client_name=client,
+            year=year, folder_path=project_folder, template_type='new',
+        )
+        project = tracker.get_project(pid)
+        return jsonify(project), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/<int:project_id>', methods=['PUT'])
+def api_project_update(project_id):
+    data = request.get_json(force=True)
+    tracker = _get_tracker()
+    try:
+        project = tracker.get_project(project_id)
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+        kwargs = {}
+        for field in ('status', 'notes', 'client_name'):
+            if field in data:
+                kwargs[field] = data[field]
+        tracker.update_project(project_id, **kwargs)
+        return jsonify({'message': 'Updated', 'id': project_id})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/<int:project_id>', methods=['DELETE'])
+def api_project_delete(project_id):
+    tracker = _get_tracker()
+    try:
+        project = tracker.get_project(project_id)
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+        tracker.delete_project(project_id)
+        return jsonify({'message': 'Removed from database (files untouched)'})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/scan', methods=['POST'])
+def api_projects_bulk_scan():
+    """Walk project folders and index into database.
+
+    Handles two layouts:
+    1. Year folders (2010, 2011, ...) containing project folders
+    2. Project folders directly under base path
+    """
+    base_path = _get_projects_base()
+    if not os.path.isdir(base_path):
+        return jsonify({'error': f'Projects folder not found: {base_path}'}), 404
+
+    tracker = _get_tracker()
+    scanned = 0
+    new_count = 0
+    updated_count = 0
+    try:
+        now = datetime.now().isoformat()
+
+        # Collect all project folder candidates
+        project_dirs = []
+        for entry in sorted(os.scandir(base_path), key=lambda e: e.name):
+            if not entry.is_dir():
+                continue
+            # Check if this is a year folder (e.g. "2015")
+            if re.match(r'^\d{4}$', entry.name):
+                # Walk inside the year folder for project dirs
+                try:
+                    for sub_entry in sorted(os.scandir(entry.path), key=lambda e: e.name):
+                        if sub_entry.is_dir():
+                            project_dirs.append(sub_entry)
+                except OSError:
+                    pass
+            else:
+                # Direct project folder under base
+                project_dirs.append(entry)
+
+        for entry in project_dirs:
+            m = _PROJECT_NAME_RE.match(entry.name)
+            if not m:
+                continue
+
+            number = m.group(1)
+            variant = m.group(2) or ''
+            client = m.group(3).strip().strip('-').strip()
+            # Detect year from project number (YYMMDD -> 20YY)
+            try:
+                yy = int(number[:2])
+                year = 2000 + yy if yy < 50 else 1900 + yy
+            except (ValueError, IndexError):
+                year = None
+
+            folder_path = entry.path
+            # List subfolders
+            subfolders = []
+            try:
+                for sub in os.scandir(folder_path):
+                    if sub.is_dir() and sub.name not in JUNK_FILES:
+                        subfolders.append(sub.name)
+            except OSError:
+                pass
+
+            template_type = _detect_template_type(subfolders)
+            file_count = _count_files_shallow(folder_path)
+            # Also count files in immediate subfolders
+            for sf_name in subfolders:
+                file_count += _count_files_shallow(os.path.join(folder_path, sf_name))
+
+            existing = tracker.get_project_by_folder(folder_path)
+            if existing:
+                tracker.update_project(existing['id'],
+                                       file_count=file_count,
+                                       template_type=template_type,
+                                       scanned_at=now)
+                updated_count += 1
+            else:
+                tracker.add_project(
+                    project_number=number, variant=variant, client_name=client,
+                    year=year, folder_path=folder_path, template_type=template_type,
+                )
+                proj = tracker.get_project_by_folder(folder_path)
+                if proj:
+                    tracker.update_project(proj['id'], file_count=file_count, scanned_at=now)
+                new_count += 1
+            scanned += 1
+
+        return jsonify({'scanned': scanned, 'new_count': new_count, 'updated_count': updated_count})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/<int:project_id>/scan', methods=['POST'])
+def api_project_deep_scan(project_id):
+    """Deep scan a single project: count files per subfolder, detect doc sequences."""
+    tracker = _get_tracker()
+    try:
+        project = tracker.get_project(project_id)
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+
+        folder_path = project['folder_path']
+        if not os.path.isdir(folder_path):
+            return jsonify({'error': 'Folder not found on disk'}), 404
+
+        subfolder_data = {}
+        total_files = 0
+        detected_sequences = {}
+
+        # Walk subfolders
+        try:
+            for sub_entry in os.scandir(folder_path):
+                if not sub_entry.is_dir() or sub_entry.name in JUNK_FILES:
+                    continue
+                sf_name = sub_entry.name
+                sf_path = sub_entry.path
+                sf_files = []
+                try:
+                    for f in os.scandir(sf_path):
+                        if f.is_file() and f.name not in JUNK_FILES:
+                            sf_files.append(f.name)
+                except OSError:
+                    pass
+                count = len(sf_files)
+                total_files += count
+                subfolder_data[sf_name] = {'exists': True, 'count': count}
+
+                # Detect document sequences from filenames
+                for fname in sf_files:
+                    dm = _DOC_NAME_RE.match(fname)
+                    if dm:
+                        code = dm.group(2).upper()
+                        seq_num = int(dm.group(3))
+                        if code not in detected_sequences or seq_num > detected_sequences[code]:
+                            detected_sequences[code] = seq_num
+        except OSError:
+            pass
+
+        # Also count files in root
+        root_files = _count_files_shallow(folder_path)
+        total_files += root_files
+
+        now = datetime.now().isoformat()
+        tracker.update_project(project_id,
+                               file_count=total_files,
+                               subfolder_json=json.dumps(subfolder_data),
+                               scanned_at=now)
+        if detected_sequences:
+            tracker.seed_doc_sequences_from_scan(project_id, detected_sequences)
+
+        project = tracker.get_project(project_id)
+        project['doc_sequences'] = tracker.get_doc_sequences(project_id)
+        return jsonify(project)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/<int:project_id>/next-doc-number', methods=['POST'])
+def api_project_next_doc_number(project_id):
+    data = request.get_json(force=True)
+    doc_type_code = (data.get('doc_type_code') or '').strip().upper()
+    if not doc_type_code:
+        return jsonify({'error': 'doc_type_code is required'}), 400
+
+    tracker = _get_tracker()
+    try:
+        doc_number = tracker.get_next_doc_number(project_id, doc_type_code)
+        if not doc_number:
+            return jsonify({'error': 'Project not found'}), 404
+        return jsonify({'doc_number': doc_number, 'doc_type_code': doc_type_code})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/projects/<int:project_id>/doc-sequences', methods=['GET'])
+def api_project_doc_sequences(project_id):
+    tracker = _get_tracker()
+    try:
+        sequences = tracker.get_doc_sequences(project_id)
+        return jsonify({'sequences': sequences})
+    finally:
+        tracker.close()
+
+
 # --- Excel Export ---
 
 @app.route('/api/export/excel')

@@ -1013,6 +1013,7 @@
         <button class="tab-btn" data-tab="processed" onclick="switchTab('processed')">Processed</button>
         <button class="tab-btn" data-tab="departments" onclick="switchTab('departments')">Depts</button>
         <button class="tab-btn" data-tab="contacts" onclick="switchTab('contacts')">Contacts</button>
+        <button class="tab-btn" data-tab="projects" onclick="switchTab('projects')">Projects</button>
     </div>
 
     <div class="toast-container" id="toastContainer"></div>
@@ -1361,6 +1362,133 @@
         </div>
     </div>
 
+    <!-- PROJECTS -->
+    <div class="tab-panel" id="tab-projects">
+        <div class="container">
+            <div class="kpi-row" id="projectKpiRow">
+                <div class="kpi-card border-primary"><div class="kpi-value" id="projKpiTotal">--</div><div class="kpi-label">Total Projects</div></div>
+                <div class="kpi-card border-success"><div class="kpi-value text-success" id="projKpiActive">--</div><div class="kpi-label">Active</div></div>
+                <div class="kpi-card border-purple"><div class="kpi-value" id="projKpiCoc">--</div><div class="kpi-label">With COC</div></div>
+                <div class="kpi-card border-info"><div class="kpi-value" id="projKpiFiles">--</div><div class="kpi-label">Total Files</div></div>
+            </div>
+
+            <div class="table-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-top">
+                        <h2>Projects</h2>
+                        <div class="toolbar-controls">
+                            <button class="btn btn-primary btn-sm" id="btnScanProjects" onclick="scanProjects()">Scan Folders</button>
+                            <button class="btn btn-success btn-sm" onclick="showNewProjectForm()">New Project</button>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+                        <input class="search-box" id="projectSearch" type="text" placeholder="Search projects..." oninput="filterProjects()" style="flex:2;min-width:160px">
+                        <select class="inline-select" id="projectYearFilter" onchange="filterProjects()" style="flex:0 0 100px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+                            <option value="">All Years</option>
+                        </select>
+                        <select class="inline-select" id="projectStatusFilter" onchange="filterProjects()" style="flex:0 0 110px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+                            <option value="">All Status</option>
+                            <option value="active">Active</option>
+                            <option value="completed">Completed</option>
+                            <option value="archived">Archived</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- New Project Form (hidden by default) -->
+                <div id="newProjectForm" style="display:none;padding:16px;border-bottom:1px solid var(--border);background:var(--bg)">
+                    <div style="font-weight:600;margin-bottom:10px">Create New Project</div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Project Number</label><input type="text" id="newProjNumber" placeholder="e.g. 260101" maxlength="6"></div>
+                        <div class="form-group"><label>Client Name</label><input type="text" id="newProjClient" placeholder="e.g. Saudi Aramco"></div>
+                        <div class="form-group"><label>Year</label><input type="number" id="newProjYear" placeholder="2026" value="2026" min="2000" max="2099"></div>
+                        <div class="form-group"><label>Variant</label><input type="text" id="newProjVariant" placeholder="A, B..." maxlength="1"></div>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+                        <button class="btn btn-ghost btn-sm" onclick="hideNewProjectForm()">Cancel</button>
+                        <button class="btn btn-primary btn-sm" onclick="createProject()">Create Project</button>
+                    </div>
+                </div>
+
+                <div id="projectTableWrap">
+                    <div class="empty-state">No projects scanned yet. Click "Scan Folders" to index your project folders.</div>
+                </div>
+            </div>
+
+            <!-- Project Detail Panel (hidden until row click) -->
+            <div class="table-card" id="projectDetailPanel" style="display:none;margin-top:16px">
+                <div style="padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+                    <h2 id="projDetailTitle" style="margin:0">--</h2>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <button class="btn btn-primary btn-sm" onclick="deepScanProject(currentProjectId)">Re-scan Files</button>
+                        <button class="btn btn-ghost btn-sm" onclick="hideProjectDetail()">Close</button>
+                    </div>
+                </div>
+                <div style="padding:16px">
+                    <!-- Status + Notes -->
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+                        <div class="form-group" style="flex:0 0 140px">
+                            <label>Status</label>
+                            <select class="inline-select" id="projDetailStatus" onchange="updateProjectStatus(currentProjectId)" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text)">
+                                <option value="active">Active</option>
+                                <option value="completed">Completed</option>
+                                <option value="archived">Archived</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:1;min-width:200px">
+                            <label>Notes</label>
+                            <div style="display:flex;gap:6px">
+                                <input type="text" id="projDetailNotes" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text)">
+                                <button class="btn btn-ghost btn-sm" onclick="updateProjectNotes(currentProjectId)">Save</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Subfolder Checklist -->
+                    <div style="margin-bottom:16px">
+                        <div style="font-weight:600;margin-bottom:8px;font-size:13px">Folder Completeness</div>
+                        <div id="projSubfolderGrid" style="display:flex;flex-wrap:wrap;gap:6px">
+                            <span style="color:var(--text-muted);font-size:12px">Click "Re-scan Files" to load folder data</span>
+                        </div>
+                    </div>
+
+                    <!-- Doc Numbering -->
+                    <div style="margin-bottom:16px">
+                        <div style="font-weight:600;margin-bottom:8px;font-size:13px">Generate Document Number</div>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                            <select id="docTypeSelect" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+                                <option value="LTR">LTR (Letter)</option>
+                                <option value="INV">INV (Invoice)</option>
+                                <option value="CINV">CINV (Client Invoice)</option>
+                                <option value="DEL">DEL (Delivery Note)</option>
+                                <option value="MRR">MRR (Material Receipt)</option>
+                                <option value="PO">PO (Purchase Order)</option>
+                                <option value="RFI">RFI (Request for Information)</option>
+                                <option value="COC">COC (Cert of Completion)</option>
+                                <option value="TML">TML (Transmittal)</option>
+                                <option value="PRO">PRO (Proposal)</option>
+                                <option value="CLM">CLM (Claim)</option>
+                                <option value="FHO">FHO (Formal Handover)</option>
+                                <option value="WAR">WAR (Warranty)</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="generateDocNumber(currentProjectId)">Generate</button>
+                            <span id="generatedDocNumber" style="font-family:monospace;font-size:15px;font-weight:700;color:var(--primary);padding:4px 10px;background:var(--bg);border-radius:6px;display:none"></span>
+                            <button class="btn btn-ghost btn-sm" id="copyDocNumBtn" style="display:none" onclick="copyDocNumber()">Copy</button>
+                        </div>
+                    </div>
+
+                    <!-- Existing Sequences -->
+                    <div>
+                        <div style="font-weight:600;margin-bottom:8px;font-size:13px">Document Sequences</div>
+                        <div id="projSequencesWrap">
+                            <span style="color:var(--text-muted);font-size:12px">No sequences recorded yet</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <script>
 // ---- State ----
 var classificationOptions = { doc_types: [], disciplines: [], departments: [], team_members: [] };
@@ -1541,6 +1669,7 @@ function switchTab(tab) {
     if(tab==='processed'){fetchEmails();fetchStatus();}
     if(tab==='departments') fetchDepartments();
     if(tab==='contacts'){fetchContacts();fetchSuggestedContacts();}
+    if(tab==='projects') fetchProjects();
 }
 
 // ---- Scanner ----
@@ -2676,6 +2805,339 @@ function addSuggestedContact(email,name,company,department){
         if(d.error){showToast(d.error,'error');return;}
         showToast('Contact added','success');
         fetchSuggestedContacts();fetchContacts();
+    }).catch(function(){showToast('Failed','error');});
+}
+
+// ---- Projects ----
+var allProjects = [];
+var currentProjectId = null;
+var projectPage = 0;
+
+function fetchProjects(){
+    var params = [];
+    var year = document.getElementById('projectYearFilter').value;
+    var status = document.getElementById('projectStatusFilter').value;
+    var search = document.getElementById('projectSearch').value.trim();
+    if(year) params.push('year='+year);
+    if(status) params.push('status='+status);
+    if(search) params.push('search='+encodeURIComponent(search));
+    var qs = params.length ? '?'+params.join('&') : '';
+    fetch('/api/projects'+qs).then(function(r){return r.json();}).then(function(d){
+        allProjects = d.projects || [];
+        renderProjectKPIs(d.stats || {});
+        populateYearFilter(d.stats || {});
+        renderProjectTable(allProjects);
+    }).catch(function(){ showToast('Failed to load projects','error'); });
+}
+
+function renderProjectKPIs(stats){
+    document.getElementById('projKpiTotal').textContent = stats.total || 0;
+    document.getElementById('projKpiActive').textContent = (stats.by_status || {}).active || 0;
+    document.getElementById('projKpiCoc').textContent = stats.with_coc || 0;
+    document.getElementById('projKpiFiles').textContent = (stats.total_files || 0).toLocaleString();
+}
+
+function populateYearFilter(stats){
+    var sel = document.getElementById('projectYearFilter');
+    var current = sel.value;
+    var years = Object.keys(stats.by_year || {}).sort().reverse();
+    var html = '<option value="">All Years</option>';
+    for(var i=0;i<years.length;i++){
+        html += '<option value="'+years[i]+'"'+(years[i]==current?' selected':'')+'>'+years[i]+' ('+stats.by_year[years[i]]+')</option>';
+    }
+    sel.innerHTML = html;
+}
+
+function renderProjectTable(projects){
+    var wrap = document.getElementById('projectTableWrap');
+    if(!projects.length){
+        wrap.innerHTML = '<div class="empty-state">No projects found. Click "Scan Folders" to index your project folders.</div>';
+        return;
+    }
+    var paged = paginate(projects, projectPage);
+    var html = '';
+    // Mobile cards
+    html += '<div class="email-cards">';
+    for(var i=0;i<paged.items.length;i++){
+        var p = paged.items[i];
+        var tplBadge = renderTemplateBadge(p.template_type);
+        var statusBadge = renderProjectStatusBadge(p.status);
+        var completeness = renderCompleteness(p.subfolder_json);
+        html += '<div class="email-card" onclick="showProjectDetail('+p.id+')" style="cursor:pointer">';
+        html += '<div class="card-row"><div style="flex:1"><strong>'+esc(p.project_number+(p.variant||''))+'</strong> '+statusBadge+'</div></div>';
+        html += '<div style="font-size:13px;margin:2px 0">'+esc(p.client_name||'(unnamed)')+'</div>';
+        html += '<div class="card-meta">';
+        html += '<span>'+esc(p.year||'')+'</span>';
+        html += '<span>'+tplBadge+'</span>';
+        html += '<span>'+(p.file_count||0)+' files</span>';
+        html += '</div>';
+        if(completeness) html += '<div style="margin-top:4px">'+completeness+'</div>';
+        html += '</div>';
+    }
+    html += '</div>';
+    // Desktop table
+    html += '<div class="table-wrap"><table><thead><tr><th>#</th><th>Project No</th><th>Client</th><th>Year</th><th>Template</th><th>Files</th><th>Completeness</th><th>Status</th></tr></thead><tbody>';
+    for(var i=0;i<paged.items.length;i++){
+        var p = paged.items[i];
+        var idx = projectPage * PAGE_SIZE + i + 1;
+        var tplBadge = renderTemplateBadge(p.template_type);
+        var statusBadge = renderProjectStatusBadge(p.status);
+        var completeness = renderCompleteness(p.subfolder_json);
+        html += '<tr onclick="showProjectDetail('+p.id+')" style="cursor:pointer">';
+        html += '<td class="col-num">'+idx+'</td>';
+        html += '<td><strong>'+esc(p.project_number+(p.variant||''))+'</strong></td>';
+        html += '<td>'+esc(p.client_name||'')+'</td>';
+        html += '<td>'+(p.year||'')+'</td>';
+        html += '<td>'+tplBadge+'</td>';
+        html += '<td>'+(p.file_count||0)+'</td>';
+        html += '<td>'+completeness+'</td>';
+        html += '<td>'+statusBadge+'</td>';
+        html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+    html += renderPagination(paged.total, paged.page, 'goProjectPage');
+    wrap.innerHTML = html;
+}
+
+function goProjectPage(pg){
+    if(pg<0) return;
+    var maxP = Math.ceil(allProjects.length / PAGE_SIZE);
+    if(pg >= maxP) return;
+    projectPage = pg;
+    renderProjectTable(allProjects);
+}
+
+function renderTemplateBadge(type){
+    var colors = {old:'background:#fef3c7;color:#92400e',new:'background:#d1fae5;color:#065f46',mixed:'background:#dbeafe;color:#1e40af',unknown:'background:var(--bg);color:var(--text-muted)'};
+    var style = colors[type] || colors.unknown;
+    return '<span style="font-size:11px;padding:2px 8px;border-radius:4px;'+style+'">'+(type||'?')+'</span>';
+}
+
+function renderProjectStatusBadge(status){
+    var styles = {active:'background:#d1fae5;color:#065f46',completed:'background:#dbeafe;color:#1e40af',archived:'background:var(--bg);color:var(--text-muted)'};
+    var s = styles[status] || styles.active;
+    return '<span style="font-size:11px;padding:2px 8px;border-radius:4px;'+s+'">'+(status||'active')+'</span>';
+}
+
+function renderCompleteness(subfolderJson){
+    if(!subfolderJson || subfolderJson === '{}') return '<span style="color:var(--text-light);font-size:11px">--</span>';
+    try{
+        var data = JSON.parse(subfolderJson);
+        var keys = Object.keys(data);
+        if(!keys.length) return '<span style="color:var(--text-light);font-size:11px">--</span>';
+        var filled = 0;
+        for(var k=0;k<keys.length;k++){
+            if(data[keys[k]].count > 0) filled++;
+        }
+        var pct = Math.round(filled/keys.length*100);
+        var color = pct >= 70 ? 'var(--success)' : pct >= 40 ? 'var(--warn)' : 'var(--danger)';
+        return '<span style="font-size:11px;font-weight:600;color:'+color+'">'+filled+'/'+keys.length+' ('+pct+'%)</span>';
+    }catch(e){ return '--'; }
+}
+
+function filterProjects(){
+    projectPage = 0;
+    fetchProjects();
+}
+
+function scanProjects(){
+    var btn = document.getElementById('btnScanProjects');
+    btn.disabled = true; btn.textContent = 'Scanning...';
+    fetch('/api/projects/scan',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');}
+        else{showToast('Scanned '+d.scanned+' projects ('+d.new_count+' new, '+d.updated_count+' updated)','success');}
+        btn.disabled = false; btn.textContent = 'Scan Folders';
+        fetchProjects();
+    }).catch(function(){
+        showToast('Scan failed','error');
+        btn.disabled = false; btn.textContent = 'Scan Folders';
+    });
+}
+
+function showNewProjectForm(){
+    document.getElementById('newProjectForm').style.display = 'block';
+    document.getElementById('newProjNumber').focus();
+}
+function hideNewProjectForm(){
+    document.getElementById('newProjectForm').style.display = 'none';
+}
+function createProject(){
+    var num = document.getElementById('newProjNumber').value.trim();
+    var client = document.getElementById('newProjClient').value.trim();
+    var year = parseInt(document.getElementById('newProjYear').value) || null;
+    var variant = document.getElementById('newProjVariant').value.trim();
+    if(!num){showToast('Project number required','error');return;}
+    fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({project_number:num,client_name:client,year:year,variant:variant})
+    }).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Project created: '+num+(variant||''),'success');
+        hideNewProjectForm();
+        document.getElementById('newProjNumber').value='';
+        document.getElementById('newProjClient').value='';
+        document.getElementById('newProjVariant').value='';
+        fetchProjects();
+    }).catch(function(){showToast('Failed to create project','error');});
+}
+
+function showProjectDetail(id){
+    currentProjectId = id;
+    document.getElementById('projectDetailPanel').style.display = 'block';
+    document.getElementById('projDetailTitle').textContent = 'Loading...';
+    document.getElementById('projSubfolderGrid').innerHTML = '<span style="color:var(--text-muted);font-size:12px">Loading...</span>';
+    document.getElementById('projSequencesWrap').innerHTML = '<span style="color:var(--text-muted);font-size:12px">Loading...</span>';
+    document.getElementById('generatedDocNumber').style.display = 'none';
+    document.getElementById('copyDocNumBtn').style.display = 'none';
+
+    fetch('/api/projects/'+id).then(function(r){return r.json();}).then(function(p){
+        if(p.error){showToast(p.error,'error');return;}
+        document.getElementById('projDetailTitle').textContent = p.project_number+(p.variant||'') + (p.client_name ? ' - '+p.client_name : '');
+        document.getElementById('projDetailStatus').value = p.status || 'active';
+        document.getElementById('projDetailNotes').value = p.notes || '';
+        renderSubfolderGrid(p.subfolder_json);
+        renderDocSequences(p.doc_sequences || []);
+    }).catch(function(){showToast('Failed to load project','error');});
+
+    // Scroll to detail panel
+    setTimeout(function(){
+        document.getElementById('projectDetailPanel').scrollIntoView({behavior:'smooth',block:'start'});
+    }, 100);
+}
+
+function hideProjectDetail(){
+    document.getElementById('projectDetailPanel').style.display = 'none';
+    currentProjectId = null;
+}
+
+function renderSubfolderGrid(jsonStr){
+    var grid = document.getElementById('projSubfolderGrid');
+    if(!jsonStr || jsonStr === '{}'){
+        grid.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Click "Re-scan Files" to load folder data</span>';
+        return;
+    }
+    try{
+        var data = JSON.parse(jsonStr);
+        var keys = Object.keys(data).sort();
+        if(!keys.length){
+            grid.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No subfolders detected</span>';
+            return;
+        }
+        // Also show expected folders that are missing
+        var expected = ['Commercial Proposal','Cost Sheet','Client PO - Awarded','Invoice','Delivery Notes','Correspondence','Drawings','Vendor PO & Quotes','Vendor Invoice','Cert of Completion','Transmittal'];
+        var allFolders = {};
+        for(var k=0;k<keys.length;k++) allFolders[keys[k]] = data[keys[k]];
+        for(var e=0;e<expected.length;e++){
+            if(!allFolders[expected[e]]) allFolders[expected[e]] = {exists:false,count:0};
+        }
+        var sortedKeys = Object.keys(allFolders).sort();
+        var html = '';
+        for(var i=0;i<sortedKeys.length;i++){
+            var name = sortedKeys[i];
+            var info = allFolders[name];
+            var bg, color;
+            if(!info.exists){
+                bg = '#fecaca'; color = '#991b1b'; // red - missing
+            } else if(info.count > 0){
+                bg = '#d1fae5'; color = '#065f46'; // green - has files
+            } else {
+                bg = '#fef3c7'; color = '#92400e'; // amber - empty
+            }
+            html += '<span style="display:inline-block;font-size:11px;padding:4px 10px;border-radius:6px;background:'+bg+';color:'+color+';font-weight:500" title="'+name+': '+(info.count||0)+' files">';
+            html += name;
+            if(info.exists) html += ' ('+info.count+')';
+            else html += ' (missing)';
+            html += '</span>';
+        }
+        grid.innerHTML = html;
+    }catch(e){
+        grid.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Error parsing folder data</span>';
+    }
+}
+
+function renderDocSequences(sequences){
+    var wrap = document.getElementById('projSequencesWrap');
+    if(!sequences || !sequences.length){
+        wrap.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No sequences recorded yet</span>';
+        return;
+    }
+    var html = '<div style="display:flex;flex-wrap:wrap;gap:8px">';
+    for(var i=0;i<sequences.length;i++){
+        var s = sequences[i];
+        html += '<span style="font-size:12px;padding:4px 10px;border-radius:6px;background:var(--bg);font-family:monospace">';
+        html += esc(s.doc_type_code)+': '+s.last_sequence;
+        html += '</span>';
+    }
+    html += '</div>';
+    wrap.innerHTML = html;
+}
+
+function deepScanProject(id){
+    if(!id) return;
+    var btn = event.target;
+    btn.disabled = true; btn.textContent = 'Scanning...';
+    fetch('/api/projects/'+id+'/scan',{method:'POST'}).then(function(r){return r.json();}).then(function(p){
+        if(p.error){showToast(p.error,'error');}
+        else{
+            showToast('Scan complete: '+(p.file_count||0)+' files found','success');
+            renderSubfolderGrid(p.subfolder_json);
+            renderDocSequences(p.doc_sequences || []);
+        }
+        btn.disabled = false; btn.textContent = 'Re-scan Files';
+    }).catch(function(){
+        showToast('Scan failed','error');
+        btn.disabled = false; btn.textContent = 'Re-scan Files';
+    });
+}
+
+function generateDocNumber(projectId){
+    if(!projectId) return;
+    var code = document.getElementById('docTypeSelect').value;
+    fetch('/api/projects/'+projectId+'/next-doc-number',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({doc_type_code:code})
+    }).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        var el = document.getElementById('generatedDocNumber');
+        el.textContent = d.doc_number;
+        el.style.display = 'inline-block';
+        document.getElementById('copyDocNumBtn').style.display = 'inline-block';
+        showToast('Generated: '+d.doc_number,'success');
+        // Refresh sequences
+        fetch('/api/projects/'+projectId+'/doc-sequences').then(function(r2){return r2.json();}).then(function(d2){
+            renderDocSequences(d2.sequences || []);
+        });
+    }).catch(function(){showToast('Failed to generate number','error');});
+}
+
+function copyDocNumber(){
+    var text = document.getElementById('generatedDocNumber').textContent;
+    if(navigator.clipboard){
+        navigator.clipboard.writeText(text).then(function(){showToast('Copied: '+text,'success');});
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        showToast('Copied: '+text,'success');
+    }
+}
+
+function updateProjectStatus(id){
+    var status = document.getElementById('projDetailStatus').value;
+    fetch('/api/projects/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({status:status})
+    }).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Status updated','success');
+        fetchProjects();
+    }).catch(function(){showToast('Failed','error');});
+}
+
+function updateProjectNotes(id){
+    var notes = document.getElementById('projDetailNotes').value;
+    fetch('/api/projects/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({notes:notes})
+    }).then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Notes saved','success');
     }).catch(function(){showToast('Failed','error');});
 }
 
