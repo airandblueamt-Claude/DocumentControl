@@ -2335,7 +2335,7 @@ def api_nudge_team(msg_id):
         if not msg.get('assigned_to'):
             return jsonify({'error': 'No team member assigned'}), 400
         from email_interface.smtp_sender import send_team_reminder
-        result = send_team_reminder(BASE_DIR, tracker, msg)
+        result = send_team_reminder(BASE_DIR, tracker, msg, manual=True)
         if result['success']:
             return jsonify({'message': f"Reminder sent to {msg['assigned_to']}"})
         return jsonify({'error': result['error']}), 500

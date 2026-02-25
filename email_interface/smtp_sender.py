@@ -272,9 +272,13 @@ def _resolve_team_email(tracker, name):
     return contact['email'] if contact else None
 
 
-def send_team_reminder(base_dir, tracker, processed_msg):
-    """Send reminder to an assigned team member. Returns result dict."""
-    if tracker.get_setting('team_reminder_enabled') != 'true':
+def send_team_reminder(base_dir, tracker, processed_msg, manual=False):
+    """Send reminder to an assigned team member. Returns result dict.
+
+    Args:
+        manual: If True, skip the team_reminder_enabled check (for nudge button).
+    """
+    if not manual and tracker.get_setting('team_reminder_enabled') != 'true':
         return {'success': False, 'error': 'Team reminders disabled'}
 
     if tracker.get_setting('smtp_enabled') != 'true':
