@@ -3,7 +3,7 @@ import logging
 import os
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +185,10 @@ _MIGRATIONS = [
     ("processed_messages", "reminder_count", "INTEGER DEFAULT 0"),
     ("processed_messages", "response_received", "INTEGER DEFAULT 0"),
     ("processed_messages", "response_due_date", "TIMESTAMP"),
+    ("processed_messages", "team_reminder_count", "INTEGER DEFAULT 0"),
+    ("processed_messages", "team_reminder_sent_at", "TIMESTAMP"),
+    ("processed_messages", "team_completed", "INTEGER DEFAULT 0"),
+    ("processed_messages", "team_completed_at", "TIMESTAMP"),
 ]
 
 
@@ -1498,6 +1502,66 @@ class ProcessingTracker:
                     "INSERT INTO document_sequences (project_id, doc_type_code, last_sequence, updated_at) VALUES (?, ?, ?, ?)",
                     (project_id, code, max_seq, now),
                 )
+        self._conn.commit()
+
+    # --- Team Member Reminders ---
+
+    def find_contact_by_name(self, name):
+        """Look up a team member contact by name (case-insensitive exact match)."""
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            "SELECT * FROM contacts WHERE LOWER(name) = LOWER(?) AND is_team_member = 1 AND is_active = 1",
+            (name,),
+        )
+        row = cur.fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def get_team_overdue(self, days=5):
+        """Get processed messages assigned to team members that are overdue."""
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        self._conn.row_factory = sqlite3.Row
+        cur = self._conn.execute(
+            """SELECT * FROM processed_messages
+               WHERE assigned_to IS NOT NULL AND assigned_to != ''
+                 AND COALESCE(team_completed, 0) = 0
+                 AND processed_at < ?
+               ORDER BY processed_at ASC""",
+            (cutoff,),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        self._conn.row_factory = None
+        return rows
+
+    def update_team_reminder_sent(self, message_id):
+        """Increment team_reminder_count and set team_reminder_sent_at."""
+        self._conn.execute(
+            """UPDATE processed_messages
+               SET team_reminder_count = COALESCE(team_reminder_count, 0) + 1,
+                   team_reminder_sent_at = ?
+               WHERE message_id = ?""",
+            (datetime.now().isoformat(), message_id),
+        )
+        self._conn.commit()
+
+    def mark_team_completed(self, message_id):
+        """Mark a team-assigned item as completed."""
+        self._conn.execute(
+            """UPDATE processed_messages
+               SET team_completed = 1, team_completed_at = ?
+               WHERE message_id = ?""",
+            (datetime.now().isoformat(), message_id),
+        )
+        self._conn.commit()
+
+    def unmark_team_completed(self, message_id):
+        """Undo mark-completed (reopen a team task)."""
+        self._conn.execute(
+            """UPDATE processed_messages
+               SET team_completed = 0, team_completed_at = NULL
+               WHERE message_id = ?""",
+            (message_id,),
+        )
         self._conn.commit()
 
     def close(self):

@@ -32,6 +32,23 @@ Thank you for your submission.
 Best regards,
 Document Control Department"""
 
+DEFAULT_TEAM_REMINDER_SUBJECT = 'Action Required: {subject} - {transmittal_no}'
+DEFAULT_TEAM_REMINDER_BODY = """\
+Hi {assigned_to},
+
+This is a reminder that the following item has been assigned to you and requires action:
+
+Subject: {subject}
+From: {sender_name}
+Date Received: {date}
+Reference: {transmittal_no}
+Days Since Assignment: {days_since_assigned}
+
+Please action this item at your earliest convenience.
+
+Thank you,
+Document Control"""
+
 DEFAULT_REMINDER_SUBJECT = 'Reminder: Response Required - {subject}'
 DEFAULT_REMINDER_BODY = """\
 Dear {sender_name},
@@ -245,5 +262,68 @@ def send_reminder(base_dir, tracker, processed_msg):
     # Update reminder count
     if result['success']:
         tracker.update_reminder_sent(processed_msg.get('message_id', ''))
+
+    return result
+
+
+def _resolve_team_email(tracker, name):
+    """Look up a team member's email by name. Returns email or None."""
+    contact = tracker.find_contact_by_name(name)
+    return contact['email'] if contact else None
+
+
+def send_team_reminder(base_dir, tracker, processed_msg):
+    """Send reminder to an assigned team member. Returns result dict."""
+    if tracker.get_setting('team_reminder_enabled') != 'true':
+        return {'success': False, 'error': 'Team reminders disabled'}
+
+    if tracker.get_setting('smtp_enabled') != 'true':
+        return {'success': False, 'error': 'SMTP disabled'}
+
+    assigned_to = processed_msg.get('assigned_to', '')
+    if not assigned_to:
+        return {'success': False, 'error': 'No team member assigned'}
+
+    to_address = _resolve_team_email(tracker, assigned_to)
+    if not to_address:
+        return {'success': False, 'error': f'No email found for team member: {assigned_to}'}
+
+    sender_name = processed_msg.get('sender_name', '') or processed_msg.get('sender', '').split('@')[0]
+    processed_at = processed_msg.get('processed_at', '')
+
+    # Calculate days since assignment
+    days_since = 0
+    if processed_at:
+        try:
+            from dateutil.parser import parse as parse_date
+            proc_dt = parse_date(processed_at)
+            days_since = (datetime.now() - proc_dt).days
+        except Exception:
+            pass
+
+    variables = {
+        'assigned_to': assigned_to,
+        'sender_name': sender_name,
+        'subject': processed_msg.get('subject', ''),
+        'transmittal_no': processed_msg.get('transmittal_no', ''),
+        'date': str(processed_at),
+        'days_since_assigned': str(max(days_since, 0)),
+    }
+
+    subject = _render_template(tracker, 'team_reminder_template_subject',
+                               DEFAULT_TEAM_REMINDER_SUBJECT, variables)
+    body = _render_template(tracker, 'team_reminder_template_body',
+                            DEFAULT_TEAM_REMINDER_BODY, variables)
+
+    result = send_email(base_dir, to_address, subject, body)
+
+    # Log to sent_emails table
+    _log_sent_email(tracker, processed_msg.get('message_id', ''),
+                    processed_msg.get('transmittal_no', ''),
+                    to_address, 'team_reminder', subject, body, result)
+
+    # Update team reminder count
+    if result['success']:
+        tracker.update_team_reminder_sent(processed_msg.get('message_id', ''))
 
     return result

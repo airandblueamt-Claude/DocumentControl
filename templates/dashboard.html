@@ -715,6 +715,15 @@
         .attn-dot.dot-purple { background: var(--purple); }
         .attn-dot.dot-gray { background: var(--text-light); }
         .attn-dot.dot-orange { background: #f97316; }
+        .attn-dot.dot-team { background: var(--purple); }
+        .btn-inline { display: inline-flex; align-items: center; justify-content: center; border: none; background: none; cursor: pointer; padding: 2px 5px; border-radius: 4px; font-size: 13px; line-height: 1; vertical-align: middle; }
+        .btn-inline:hover { background: var(--border); }
+        .btn-inline.nudge { color: var(--primary); }
+        .btn-inline.complete { color: var(--success); }
+        .btn-inline.reopen { color: var(--warn); }
+        .team-done-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px; background: #dcfce7; color: #166534; margin-left: 4px; vertical-align: middle; }
+        [data-theme="dark"] .team-done-badge { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .btn-inline:hover { background: #334155; }
         .attn-label { font-size: 10px; font-weight: 600; color: var(--text-light); margin-left: auto; white-space: nowrap; }
         .attn-empty { font-size: 12px; color: var(--text-light); padding: 8px 0; }
 
@@ -1248,6 +1257,34 @@
                             <textarea id="reminderTplBody" rows="8" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:monospace;font-size:12px;resize:vertical"></textarea>
                         </div>
                     </details>
+
+                    <!-- Team Reminders Sub-section -->
+                    <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px">
+                        <div style="font-weight:600;font-size:13px;margin-bottom:10px">Team Member Reminders</div>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:12px">
+                            <input type="checkbox" id="teamReminderEnabledCb" onchange="saveTeamReminderSettings()">
+                            <span style="font-weight:600">Send Team Reminders</span>
+                        </label>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:12px">
+                            <div>
+                                <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Remind after <strong id="teamReminderDaysVal">5</strong> days</label>
+                                <input type="range" id="teamReminderDays" min="1" max="14" step="1" value="5" oninput="document.getElementById('teamReminderDaysVal').textContent=this.value" style="width:100%">
+                            </div>
+                            <div>
+                                <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Max <strong id="teamReminderMaxVal">3</strong> reminders</label>
+                                <input type="range" id="teamReminderMax" min="1" max="10" step="1" value="3" oninput="document.getElementById('teamReminderMaxVal').textContent=this.value" style="width:100%">
+                            </div>
+                        </div>
+                        <details style="margin-bottom:4px">
+                            <summary style="cursor:pointer;font-weight:600;font-size:13px;margin-bottom:8px">Team Reminder Template</summary>
+                            <div style="margin-top:8px">
+                                <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Subject</label>
+                                <input type="text" id="teamReminderTplSubject" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-bottom:8px">
+                                <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Body <span style="opacity:0.7">(Variables: {assigned_to}, {sender_name}, {subject}, {transmittal_no}, {date}, {days_since_assigned})</span></label>
+                                <textarea id="teamReminderTplBody" rows="8" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:monospace;font-size:12px;resize:vertical"></textarea>
+                            </div>
+                        </details>
+                    </div>
 
                     <button class="btn btn-primary btn-sm" onclick="saveEmailSettings()" style="margin-top:4px">Save Email Settings</button>
                     <button class="btn btn-ghost btn-sm" onclick="saveEmailTemplates()" style="margin-left:8px">Save Templates</button>
@@ -2366,7 +2403,16 @@ function renderProcessedTable(){
         html+='<div class="card-tags">';
         if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
         if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
-        if(e.assigned_to) html+='<span class="card-tag tag-person">'+esc(e.assigned_to)+'</span>';
+        if(e.assigned_to){
+            html+='<span class="card-tag tag-person">'+esc(e.assigned_to)+'</span>';
+            if(e.team_completed){
+                html+='<span class="team-done-badge">Done</span>';
+                html+='<button class="btn-inline reopen" onclick="reopenTeamTask(\''+esc(e.message_id)+'\')" title="Reopen">&#8634;</button>';
+            } else {
+                html+='<button class="btn-inline nudge" onclick="nudgeTeam(\''+esc(e.message_id)+'\')" title="Send reminder">&#9993;</button>';
+                html+='<button class="btn-inline complete" onclick="markTeamComplete(\''+esc(e.message_id)+'\')" title="Mark complete">&#10003;</button>';
+            }
+        }
         html+='</div></div>';
         // Follow-up cards (hidden by default)
         for(var fi=0;fi<fups.length;fi++){
@@ -2403,7 +2449,7 @@ function renderProcessedTable(){
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
             '<td class="col-cc" title="'+esc(fmtRecipientsTitle(e.cc_recipients))+'">'+procCcShort+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
-            '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.assigned_to||'')+'</td>'+
+            '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.assigned_to||'')+(e.assigned_to?(e.team_completed?'<span class="team-done-badge">Done</span><button class="btn-inline reopen" onclick="reopenTeamTask(\''+esc(e.message_id)+'\')" title="Reopen">&#8634;</button>':'<button class="btn-inline nudge" onclick="nudgeTeam(\''+esc(e.message_id)+'\')" title="Send reminder">&#9993;</button><button class="btn-inline complete" onclick="markTeamComplete(\''+esc(e.message_id)+'\')" title="Mark complete">&#10003;</button>'):'')+'</td>'+
             '<td><span class="'+rc+'">'+rt+'</span></td>'+
             '<td>'+(e.acknowledgment_sent_at?'<span style="color:var(--success)" title="Sent '+esc(e.acknowledgment_sent_at||'')+'">&#10003;</span>':(e.acknowledgment_required?'<span style="color:var(--warn)">Pending</span>':''))+'</td>'+
             '<td id="proc-att-'+esc(e.message_id)+'">'+(e.attachment_count||0)+'</td></tr>';
@@ -2663,6 +2709,14 @@ function renderAttentionCard(attn){
         }
     }
 
+    // Team overdue items
+    if(attn.team_overdue && attn.team_overdue.length){
+        for(var ti=0;ti<attn.team_overdue.length;ti++){
+            var td=attn.team_overdue[ti];
+            items.push({item:{id:'team-'+ti, subject: (td.subject||'(no subject)')}, dotClass:'dot-team', label:'Team: '+(td.assigned_to||'')+(attn.team_overdue_count>10?' ('+attn.team_overdue_count+')':'')});
+        }
+    }
+
     if(items.length === 0){
         list.innerHTML = '<li class="attn-empty">Nothing needs attention right now.</li>';
         return;
@@ -2884,7 +2938,7 @@ function saveAutoSettings(){
 function toggleEmailSettings(){
     var body=document.getElementById('emailSettingsBody');
     var tog=document.getElementById('emailSettingsToggle');
-    if(body.style.display==='none'){body.style.display='block';tog.innerHTML='&#9650;';fetchEmailSettings();fetchEmailTemplates();}
+    if(body.style.display==='none'){body.style.display='block';tog.innerHTML='&#9650;';fetchEmailSettings();fetchEmailTemplates();fetchTeamReminderSettings();}
     else{body.style.display='none';tog.innerHTML='&#9660;';}
 }
 function fetchEmailSettings(){
@@ -2913,6 +2967,8 @@ function fetchEmailTemplates(){
         document.getElementById('ackTplBody').value=d.ack_template_body||'';
         document.getElementById('reminderTplSubject').value=d.reminder_template_subject||'';
         document.getElementById('reminderTplBody').value=d.reminder_template_body||'';
+        document.getElementById('teamReminderTplSubject').value=d.team_reminder_template_subject||'';
+        document.getElementById('teamReminderTplBody').value=d.team_reminder_template_body||'';
     }).catch(function(){});
 }
 function saveEmailSettings(){
@@ -2936,7 +2992,9 @@ function saveEmailTemplates(){
         ack_template_subject:document.getElementById('ackTplSubject').value,
         ack_template_body:document.getElementById('ackTplBody').value,
         reminder_template_subject:document.getElementById('reminderTplSubject').value,
-        reminder_template_body:document.getElementById('reminderTplBody').value
+        reminder_template_body:document.getElementById('reminderTplBody').value,
+        team_reminder_template_subject:document.getElementById('teamReminderTplSubject').value,
+        team_reminder_template_body:document.getElementById('teamReminderTplBody').value
     };
     fetch('/api/settings/email-templates',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
     .then(function(r){return r.json();}).then(function(d){
@@ -2954,6 +3012,56 @@ function testSmtp(){
         if(d.error){showToast('SMTP test failed: '+d.error,'error');}
         else showToast('Test email sent!','success');
     }).catch(function(){showToast('SMTP test failed','error');});
+}
+
+// ---- Team Member Reminder Functions ----
+function nudgeTeam(msgId){
+    if(!confirm('Send reminder to the assigned team member?')) return;
+    fetch('/api/processed/'+encodeURIComponent(msgId)+'/nudge',{method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast(d.message,'success');
+        fetchEmails(processedServerPage);
+    }).catch(function(){showToast('Failed to send nudge','error');});
+}
+function markTeamComplete(msgId){
+    fetch('/api/processed/'+encodeURIComponent(msgId)+'/mark-completed',{method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Marked as completed','success');
+        fetchEmails(processedServerPage);
+    }).catch(function(){showToast('Failed to mark complete','error');});
+}
+function reopenTeamTask(msgId){
+    fetch('/api/processed/'+encodeURIComponent(msgId)+'/reopen',{method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Reopened','success');
+        fetchEmails(processedServerPage);
+    }).catch(function(){showToast('Failed to reopen','error');});
+}
+function fetchTeamReminderSettings(){
+    fetch('/api/settings/team-reminders').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('teamReminderEnabledCb').checked=d.team_reminder_enabled;
+        document.getElementById('teamReminderDays').value=d.team_reminder_days||5;
+        document.getElementById('teamReminderDaysVal').textContent=d.team_reminder_days||5;
+        document.getElementById('teamReminderMax').value=d.team_reminder_max_count||3;
+        document.getElementById('teamReminderMaxVal').textContent=d.team_reminder_max_count||3;
+    }).catch(function(){});
+}
+function saveTeamReminderSettings(){
+    var data={
+        team_reminder_enabled:document.getElementById('teamReminderEnabledCb').checked,
+        team_reminder_days:parseInt(document.getElementById('teamReminderDays').value),
+        team_reminder_max_count:parseInt(document.getElementById('teamReminderMax').value)
+    };
+    fetch('/api/settings/team-reminders',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        var st=document.getElementById('emailSettingsStatus');
+        st.textContent='Team settings saved';st.style.color='var(--success)';
+        setTimeout(function(){st.textContent='';},2000);
+    }).catch(function(){showToast('Failed to save team settings','error');});
 }
 
 // ---- Suggested Contacts ----

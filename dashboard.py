@@ -548,9 +548,9 @@ def _query_time_series(conn, today, week_start, month_start):
 def _query_attention_needed(conn):
     """Lists of emails needing attention (max 10 each) plus total counts."""
     attn = {'high_priority': [], 'stale': [], 'response_required': [], 'low_confidence': [],
-            'overdue_responses': [],
+            'overdue_responses': [], 'team_overdue': [],
             'high_priority_count': 0, 'stale_count': 0, 'response_required_count': 0,
-            'low_confidence_count': 0, 'overdue_responses_count': 0}
+            'low_confidence_count': 0, 'overdue_responses_count': 0, 'team_overdue_count': 0}
     fields = "id, subject, sender, sender_name, scanned_at, department, ai_priority, confidence"
     try:
         attn['high_priority_count'] = conn.execute(
@@ -600,6 +600,26 @@ def _query_attention_needed(conn):
                     ORDER BY response_due_date ASC LIMIT 10"""
             ):
                 attn['overdue_responses'].append(dict(row))
+        except sqlite3.OperationalError:
+            pass
+
+        # Team overdue (assigned to team member, not completed, older than 5 days)
+        try:
+            attn['team_overdue_count'] = conn.execute(
+                """SELECT COUNT(*) FROM processed_messages
+                   WHERE assigned_to IS NOT NULL AND assigned_to != ''
+                     AND COALESCE(team_completed, 0) = 0
+                     AND processed_at < datetime('now', '-5 days')"""
+            ).fetchone()[0]
+            team_fields = "message_id, transmittal_no, subject, sender_name, assigned_to, processed_at"
+            for row in conn.execute(
+                f"""SELECT {team_fields} FROM processed_messages
+                    WHERE assigned_to IS NOT NULL AND assigned_to != ''
+                      AND COALESCE(team_completed, 0) = 0
+                      AND processed_at < datetime('now', '-5 days')
+                    ORDER BY processed_at ASC LIMIT 10"""
+            ):
+                attn['team_overdue'].append(dict(row))
         except sqlite3.OperationalError:
             pass
     except sqlite3.OperationalError:
@@ -892,7 +912,9 @@ def api_emails():
                       pm.response_due_date, pm.response_received, pm.reminder_count,
                       pm.references_json, pm.conversation_id, pm.message_id,
                       pe.classifier_method, pe.auto_approved,
-                      pm.assigned_to
+                      pm.assigned_to,
+                      pm.team_completed, pm.team_completed_at,
+                      pm.team_reminder_count, pm.team_reminder_sent_at
                FROM processed_messages pm
                LEFT JOIN pending_emails pe ON pm.message_id = pe.message_id
                {join_where}
@@ -2160,18 +2182,21 @@ def api_smtp_test():
 
 @app.route('/api/settings/email-templates', methods=['GET'])
 def api_get_email_templates():
-    """Return acknowledgment and reminder email templates."""
+    """Return acknowledgment, reminder, and team reminder email templates."""
     tracker = _get_tracker()
     try:
         from email_interface.smtp_sender import (
             DEFAULT_ACK_SUBJECT, DEFAULT_ACK_BODY,
             DEFAULT_REMINDER_SUBJECT, DEFAULT_REMINDER_BODY,
+            DEFAULT_TEAM_REMINDER_SUBJECT, DEFAULT_TEAM_REMINDER_BODY,
         )
         return jsonify({
             'ack_template_subject': tracker.get_setting('ack_template_subject') or DEFAULT_ACK_SUBJECT,
             'ack_template_body': tracker.get_setting('ack_template_body') or DEFAULT_ACK_BODY,
             'reminder_template_subject': tracker.get_setting('reminder_template_subject') or DEFAULT_REMINDER_SUBJECT,
             'reminder_template_body': tracker.get_setting('reminder_template_body') or DEFAULT_REMINDER_BODY,
+            'team_reminder_template_subject': tracker.get_setting('team_reminder_template_subject') or DEFAULT_TEAM_REMINDER_SUBJECT,
+            'team_reminder_template_body': tracker.get_setting('team_reminder_template_body') or DEFAULT_TEAM_REMINDER_BODY,
         })
     finally:
         tracker.close()
@@ -2179,12 +2204,13 @@ def api_get_email_templates():
 
 @app.route('/api/settings/email-templates', methods=['PUT'])
 def api_set_email_templates():
-    """Save acknowledgment and reminder email templates."""
+    """Save acknowledgment, reminder, and team reminder email templates."""
     data = request.get_json(silent=True) or {}
     tracker = _get_tracker()
     try:
         for key in ('ack_template_subject', 'ack_template_body',
-                     'reminder_template_subject', 'reminder_template_body'):
+                     'reminder_template_subject', 'reminder_template_body',
+                     'team_reminder_template_subject', 'team_reminder_template_body'):
             if key in data:
                 tracker.set_setting(key, data[key])
         return jsonify({'message': 'Templates saved'})
@@ -2291,6 +2317,87 @@ def api_sent_emails():
         tracker.close()
 
 
+# --- Team Member Reminder Routes ---
+
+@app.route('/api/processed/<path:msg_id>/nudge', methods=['POST'])
+def api_nudge_team(msg_id):
+    """Manual nudge: send reminder to assigned team member."""
+    tracker = _get_tracker()
+    try:
+        tracker._conn.row_factory = sqlite3.Row
+        cur = tracker._conn.execute(
+            "SELECT * FROM processed_messages WHERE message_id = ?", (msg_id,))
+        row = cur.fetchone()
+        tracker._conn.row_factory = None
+        if not row:
+            return jsonify({'error': 'Message not found'}), 404
+        msg = dict(row)
+        if not msg.get('assigned_to'):
+            return jsonify({'error': 'No team member assigned'}), 400
+        from email_interface.smtp_sender import send_team_reminder
+        result = send_team_reminder(BASE_DIR, tracker, msg)
+        if result['success']:
+            return jsonify({'message': f"Reminder sent to {msg['assigned_to']}"})
+        return jsonify({'error': result['error']}), 500
+    finally:
+        tracker.close()
+
+
+@app.route('/api/processed/<path:msg_id>/mark-completed', methods=['POST'])
+def api_mark_team_completed(msg_id):
+    """Mark a team-assigned item as completed."""
+    tracker = _get_tracker()
+    try:
+        tracker.mark_team_completed(msg_id)
+        return jsonify({'message': 'Marked as completed'})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/processed/<path:msg_id>/reopen', methods=['POST'])
+def api_reopen_team_task(msg_id):
+    """Reopen a completed team task."""
+    tracker = _get_tracker()
+    try:
+        tracker.unmark_team_completed(msg_id)
+        return jsonify({'message': 'Reopened'})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/team-reminders', methods=['GET'])
+def api_get_team_reminder_settings():
+    """Return team reminder settings."""
+    tracker = _get_tracker()
+    try:
+        return jsonify({
+            'team_reminder_enabled': tracker.get_setting('team_reminder_enabled') == 'true',
+            'team_reminder_days': int(tracker.get_setting('team_reminder_days') or '5'),
+            'team_reminder_max_count': int(tracker.get_setting('team_reminder_max_count') or '3'),
+        })
+    finally:
+        tracker.close()
+
+
+@app.route('/api/settings/team-reminders', methods=['PUT'])
+def api_set_team_reminder_settings():
+    """Update team reminder settings."""
+    data = request.get_json(silent=True) or {}
+    tracker = _get_tracker()
+    try:
+        if 'team_reminder_enabled' in data:
+            tracker.set_setting('team_reminder_enabled', 'true' if data['team_reminder_enabled'] else 'false')
+        if 'team_reminder_days' in data:
+            tracker.set_setting('team_reminder_days', str(int(data['team_reminder_days'])))
+        if 'team_reminder_max_count' in data:
+            tracker.set_setting('team_reminder_max_count', str(int(data['team_reminder_max_count'])))
+        return jsonify({'message': 'Team reminder settings saved'})
+    except (ValueError, TypeError) as e:
+        return jsonify({'error': f'Invalid value: {e}'}), 400
+    finally:
+        tracker.close()
+
+
 def run_reminder_check():
     """Scheduled job: send reminders for overdue responses."""
     tracker = _get_tracker()
@@ -2314,6 +2421,23 @@ def run_reminder_check():
                 sent += 1
         if sent:
             logger.info("Reminder check: sent %d reminders for %d overdue items", sent, len(overdue))
+
+        # --- Team member reminders ---
+        if tracker.get_setting('team_reminder_enabled') == 'true':
+            team_days = int(tracker.get_setting('team_reminder_days') or '5')
+            team_max = int(tracker.get_setting('team_reminder_max_count') or '3')
+            team_overdue = tracker.get_team_overdue(team_days)
+            team_sent = 0
+            for msg in team_overdue:
+                if (msg.get('team_reminder_count') or 0) >= team_max:
+                    continue
+                from email_interface.smtp_sender import send_team_reminder
+                result = send_team_reminder(BASE_DIR, tracker, msg)
+                if result['success']:
+                    team_sent += 1
+            if team_sent:
+                logger.info("Team reminder check: sent %d reminders for %d overdue team items",
+                            team_sent, len(team_overdue))
     except Exception as e:
         logger.error("Reminder check failed: %s", e)
     finally:
