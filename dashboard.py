@@ -2295,9 +2295,9 @@ def api_send_reminder(msg_id):
             return jsonify({'error': 'Message not found'}), 404
         msg = dict(row)
         from email_interface.smtp_sender import send_reminder
-        result = send_reminder(BASE_DIR, tracker, msg)
+        result = send_reminder(BASE_DIR, tracker, msg, manual=True)
         if result['success']:
-            return jsonify({'message': 'Reminder sent'})
+            return jsonify({'message': 'Reminder sent to ' + (msg.get('sender', ''))})
         return jsonify({'error': result['error']}), 500
     finally:
         tracker.close()

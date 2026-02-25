@@ -2368,6 +2368,53 @@ function toggleFollowUps(tn){
     cards.forEach(function(c){c.style.display=showing?'none':'block';});
     if(btn) btn.textContent=showing?'+'+rows.length:'−';
 }
+function renderProcessedActions(e){
+    // Build action buttons HTML for a processed email
+    var acts='';
+    // Client response actions
+    if(e.response_required){
+        if(e.response_received){
+            acts+='<span style="color:var(--success);font-size:11px;font-weight:600">Responded</span> ';
+        } else {
+            acts+='<button class="btn-inline nudge" onclick="sendClientReminder(\''+esc(e.message_id)+'\')" title="Send reminder to sender">&#9993; Remind</button>';
+            acts+='<button class="btn-inline complete" onclick="markResponded(\''+esc(e.message_id)+'\')" title="Mark response received">&#10003; Responded</button>';
+            if(e.reminder_count>0) acts+='<span style="font-size:10px;color:var(--text-muted);margin-left:2px">('+e.reminder_count+'x)</span>';
+        }
+    }
+    // Team member actions
+    if(e.assigned_to){
+        if(acts) acts+='<span style="color:var(--border);margin:0 3px">|</span>';
+        if(e.team_completed){
+            acts+='<span class="team-done-badge">Done</span>';
+            acts+='<button class="btn-inline reopen" onclick="reopenTeamTask(\''+esc(e.message_id)+'\')" title="Reopen task">&#8634;</button>';
+        } else {
+            acts+='<button class="btn-inline nudge" onclick="nudgeTeam(\''+esc(e.message_id)+'\')" title="Send reminder to '+esc(e.assigned_to)+'">&#9993; Nudge</button>';
+            acts+='<button class="btn-inline complete" onclick="markTeamComplete(\''+esc(e.message_id)+'\')" title="Mark task complete">&#10003; Done</button>';
+            if(e.team_reminder_count>0) acts+='<span style="font-size:10px;color:var(--text-muted);margin-left:2px">('+e.team_reminder_count+'x)</span>';
+        }
+    }
+    // Ack status
+    if(e.acknowledgment_sent_at){
+        if(acts) acts+=' ';
+        acts+='<span style="color:var(--success);font-size:11px" title="Ack sent '+esc(e.acknowledgment_sent_at||'')+'">&#10003;Ack</span>';
+    } else if(e.acknowledgment_required){
+        if(acts) acts+=' ';
+        acts+='<span style="color:var(--warn);font-size:11px">Ack pending</span>';
+    }
+    return acts || '<span style="color:var(--text-light);font-size:11px">—</span>';
+}
+function _fetchAttachmentLinks(msgId){
+    fetch('/api/processed/'+encodeURIComponent(msgId)+'/attachments').then(function(r){return r.json();}).then(function(data){
+        var cell=document.getElementById('proc-att-'+msgId);
+        if(!cell||!data.attachments||!data.attachments.length) return;
+        var pid=data.pending_id;
+        var links='<div class="att-list">';
+        data.attachments.forEach(function(att){
+            var sz=fmtFileSize(att.size);
+            links+='<a href="/api/pending/'+pid+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>';
+        }); links+='</div>'; cell.innerHTML=links;
+    }).catch(function(){});
+}
 function renderProcessedTable(){
     var wrap=document.getElementById('emailTableWrap');
     var items=processedEmails;
@@ -2390,10 +2437,7 @@ function renderProcessedTable(){
         html+='<div class="card-meta">';
         html+='<span>'+esc(e.sender_name||e.sender)+'</span>';
         html+='<span>'+fmtTime(e.processed_at)+'</span>';
-        if(e.attachment_count) html+='<span>'+e.attachment_count+' att.</span>';
-        if(e.response_required) html+='<span class="resp-yes">Response needed</span>';
-        if(e.acknowledgment_sent_at) html+='<span style="color:var(--success);font-size:11px">Ack sent</span>';
-        else if(e.acknowledgment_required) html+='<span style="color:var(--warn);font-size:11px">Ack pending</span>';
+        if(e.attachment_count) html+='<span id="proc-att-card-'+esc(e.message_id)+'">'+e.attachment_count+' att.</span>';
         html+='</div>';
         var procCc=fmtRecipientsShort(e.cc_recipients);
         if(procCc) html+='<div class="card-meta"><span class="cc-label">CC:</span> <span>'+procCc+'</span></div>';
@@ -2403,17 +2447,12 @@ function renderProcessedTable(){
         html+='<div class="card-tags">';
         if(e.doc_type) html+='<span class="card-tag">'+esc(e.doc_type)+'</span>';
         if(e.discipline) html+='<span class="card-tag">'+esc(e.discipline)+'</span>';
-        if(e.assigned_to){
-            html+='<span class="card-tag tag-person">'+esc(e.assigned_to)+'</span>';
-            if(e.team_completed){
-                html+='<span class="team-done-badge">Done</span>';
-                html+='<button class="btn-inline reopen" onclick="reopenTeamTask(\''+esc(e.message_id)+'\')" title="Reopen">&#8634;</button>';
-            } else {
-                html+='<button class="btn-inline nudge" onclick="nudgeTeam(\''+esc(e.message_id)+'\')" title="Send reminder">&#9993;</button>';
-                html+='<button class="btn-inline complete" onclick="markTeamComplete(\''+esc(e.message_id)+'\')" title="Mark complete">&#10003;</button>';
-            }
-        }
-        html+='</div></div>';
+        if(e.assigned_to) html+='<span class="card-tag tag-person">'+esc(e.assigned_to)+'</span>';
+        html+='</div>';
+        // Action buttons row (card view)
+        var cardActions=renderProcessedActions(e);
+        if(cardActions) html+='<div style="padding:4px 0;display:flex;align-items:center;gap:4px;flex-wrap:wrap">'+cardActions+'</div>';
+        html+='</div>';
         // Follow-up cards (hidden by default)
         for(var fi=0;fi<fups.length;fi++){
             var fu=fups[fi];
@@ -2421,7 +2460,7 @@ function renderProcessedTable(){
             html+='<div class="card-meta"><span class="follow-up-indicator">&#8627;</span>';
             html+='<span>'+esc(fu.sender_name||fu.sender)+'</span>';
             html+='<span>'+fmtTime(fu.processed_at)+'</span>';
-            if(fu.attachment_count) html+='<span>'+fu.attachment_count+' att.</span>';
+            if(fu.attachment_count) html+='<span id="proc-att-card-'+esc(fu.message_id)+'">'+fu.attachment_count+' att.</span>';
             html+='</div>';
             html+='<div style="margin-top:2px;color:var(--text)">'+esc(fu.subject||'(no subject)')+'</div>';
             html+='</div>';
@@ -2433,13 +2472,12 @@ function renderProcessedTable(){
     var exp=viewModes.processed==='expanded'?' table-expanded':'';
     html+='<div class="table-wrap"><table class="'+exp+'"><thead><tr>'+
         '<th style="width:30px">#</th><th>Transmittal</th><th>Date</th><th>From</th><th>CC</th><th>Subject</th>'+
-        '<th>Type</th><th>Discipline</th><th>Assigned To</th><th>Resp.</th><th>Ack</th><th>Att.</th></tr></thead><tbody>';
+        '<th>Type</th><th>Discipline</th><th>Assigned To</th><th>Actions</th><th>Att.</th></tr></thead><tbody>';
     for(var i=0;i<items.length;i++){
         var e=items[i], idx=page*perPage+i+1;
         var fups=e.follow_ups||[];
         var sd=esc(e.sender_name||e.sender);
         if(e.sender_company) sd+='<span class="sender-company">'+esc(e.sender_company)+'</span>';
-        var rc=e.response_required?'resp-yes':'resp-no', rt=e.response_required?'Yes':'No';
         var fuBtn=fups.length>0?'<button class="expand-btn" id="expand-'+esc(e.transmittal_no)+'" onclick="toggleFollowUps(\''+esc(e.transmittal_no)+'\')">+'+fups.length+'</button>':'';
         var autoTag3=(e.classifier_method&&e.classifier_method.indexOf('Auto')===0)?' <span style="font-size:10px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px">Auto</span>':'';
         var procCcShort=fmtRecipientsShort(e.cc_recipients);
@@ -2449,9 +2487,9 @@ function renderProcessedTable(){
             '<td class="col-sender" title="'+esc(e.sender)+'">'+sd+'</td>'+
             '<td class="col-cc" title="'+esc(fmtRecipientsTitle(e.cc_recipients))+'">'+procCcShort+'</td>'+
             '<td class="col-subject">'+esc(e.subject)+'</td>'+
-            '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td><td>'+esc(e.assigned_to||'')+(e.assigned_to?(e.team_completed?'<span class="team-done-badge">Done</span><button class="btn-inline reopen" onclick="reopenTeamTask(\''+esc(e.message_id)+'\')" title="Reopen">&#8634;</button>':'<button class="btn-inline nudge" onclick="nudgeTeam(\''+esc(e.message_id)+'\')" title="Send reminder">&#9993;</button><button class="btn-inline complete" onclick="markTeamComplete(\''+esc(e.message_id)+'\')" title="Mark complete">&#10003;</button>'):'')+'</td>'+
-            '<td><span class="'+rc+'">'+rt+'</span></td>'+
-            '<td>'+(e.acknowledgment_sent_at?'<span style="color:var(--success)" title="Sent '+esc(e.acknowledgment_sent_at||'')+'">&#10003;</span>':(e.acknowledgment_required?'<span style="color:var(--warn)">Pending</span>':''))+'</td>'+
+            '<td>'+esc(e.doc_type||'')+'</td><td>'+esc(e.discipline||'')+'</td>'+
+            '<td>'+esc(e.assigned_to||'')+'</td>'+
+            '<td style="white-space:nowrap">'+renderProcessedActions(e)+'</td>'+
             '<td id="proc-att-'+esc(e.message_id)+'">'+(e.attachment_count||0)+'</td></tr>';
         // Follow-up rows (hidden by default)
         for(var fi=0;fi<fups.length;fi++){
@@ -2467,7 +2505,8 @@ function renderProcessedTable(){
                 '<td class="col-cc" title="'+esc(fmtRecipientsTitle(fu.cc_recipients))+'">'+fuCcShort+'</td>'+
                 '<td class="col-subject">'+esc(fu.subject)+'</td>'+
                 '<td>'+esc(fu.doc_type||'')+'</td><td>'+esc(fu.discipline||'')+'</td><td>'+esc(fu.assigned_to||'')+'</td>'+
-                '<td></td><td>'+(fu.attachment_count||0)+'</td></tr>';
+                '<td></td>'+
+                '<td id="proc-att-'+esc(fu.message_id)+'">'+(fu.attachment_count||0)+'</td></tr>';
         }
     }
     html+='</tbody></table></div>';
@@ -2488,19 +2527,12 @@ function renderProcessedTable(){
         html+='</div></div>';
     }
     wrap.innerHTML=html;
-    // Fetch attachment links for processed emails
+    // Fetch attachment links for processed emails AND follow-ups
     items.forEach(function(e){
-        if(e.attachment_count>0 && e.message_id){
-            fetch('/api/processed/'+encodeURIComponent(e.message_id)+'/attachments').then(function(r){return r.json();}).then(function(data){
-                var cell=document.getElementById('proc-att-'+e.message_id);
-                if(!cell||!data.attachments||!data.attachments.length) return;
-                var pid=data.pending_id;
-                var links='<div class="att-list">';
-                data.attachments.forEach(function(att){
-                    var sz=fmtFileSize(att.size);
-                    links+='<a href="/api/pending/'+pid+'/attachments/'+att.id+'" target="_blank" title="'+esc(att.filename)+'">'+esc(att.filename)+(sz?'<span class="att-size">('+sz+')</span>':'')+'</a>';
-                }); links+='</div>'; cell.innerHTML=links;
-            }).catch(function(){});
+        if(e.attachment_count>0 && e.message_id) _fetchAttachmentLinks(e.message_id);
+        var fups=e.follow_ups||[];
+        for(var fi=0;fi<fups.length;fi++){
+            if(fups[fi].attachment_count>0 && fups[fi].message_id) _fetchAttachmentLinks(fups[fi].message_id);
         }
     });
 }
@@ -3014,7 +3046,24 @@ function testSmtp(){
     }).catch(function(){showToast('SMTP test failed','error');});
 }
 
-// ---- Team Member Reminder Functions ----
+// ---- Reminder Functions (Client + Team) ----
+function sendClientReminder(msgId){
+    if(!confirm('Send reminder to the original sender?')) return;
+    fetch('/api/overdue/'+encodeURIComponent(msgId)+'/send-reminder',{method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast(d.message,'success');
+        fetchEmails(processedServerPage);
+    }).catch(function(){showToast('Failed to send reminder','error');});
+}
+function markResponded(msgId){
+    fetch('/api/overdue/'+encodeURIComponent(msgId)+'/mark-responded',{method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.error){showToast(d.error,'error');return;}
+        showToast('Marked as responded','success');
+        fetchEmails(processedServerPage);
+    }).catch(function(){showToast('Failed to mark responded','error');});
+}
 function nudgeTeam(msgId){
     if(!confirm('Send reminder to the assigned team member?')) return;
     fetch('/api/processed/'+encodeURIComponent(msgId)+'/nudge',{method:'POST'})

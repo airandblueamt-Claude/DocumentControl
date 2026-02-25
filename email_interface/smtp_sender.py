@@ -212,10 +212,14 @@ def send_acknowledgment(base_dir, tracker, pending_email, transmittal_no):
     return result
 
 
-def send_reminder(base_dir, tracker, processed_msg):
-    """Send response reminder. Returns result dict."""
-    # Check if reminders are enabled
-    if tracker.get_setting('reminder_enabled') != 'true':
+def send_reminder(base_dir, tracker, processed_msg, manual=False):
+    """Send response reminder. Returns result dict.
+
+    Args:
+        manual: If True, skip the reminder_enabled check (for manual button clicks).
+    """
+    # Check if reminders are enabled (skip for manual sends)
+    if not manual and tracker.get_setting('reminder_enabled') != 'true':
         return {'success': False, 'error': 'Reminders disabled'}
 
     if tracker.get_setting('smtp_enabled') != 'true':
