@@ -102,14 +102,48 @@ def _get_credentials(base_dir):
     return username, password, email_address
 
 
+def _send_via_sendgrid(api_key, from_address, from_name, to_address, subject, body_text, body_html=None):
+    """Send email via SendGrid HTTP API. Returns {'success': bool, 'error': str|None}."""
+    import sendgrid
+    from sendgrid.helpers.mail import Mail, Email, To, Content
+
+    sg = sendgrid.SendGridAPIClient(api_key=api_key)
+    from_email = Email(from_address, from_name) if from_name else Email(from_address)
+    to_email = To(to_address)
+
+    if body_html:
+        mail = Mail(from_email, to_email, subject, Content("text/plain", body_text))
+        mail.add_content(Content("text/html", body_html))
+    else:
+        mail = Mail(from_email, to_email, subject, Content("text/plain", body_text))
+
+    response = sg.client.mail.send.post(request_body=mail.get())
+    if response.status_code in (200, 201, 202):
+        return {'success': True, 'error': None}
+    return {'success': False, 'error': f'SendGrid returned {response.status_code}: {response.body}'}
+
+
 def send_email(base_dir, to_address, subject, body_text, body_html=None, reply_to=None):
-    """Send one email via SMTP. NEVER raises — returns {'success': bool, 'error': str|None}."""
+    """Send one email via SendGrid (if configured) or SMTP. NEVER raises — returns {'success': bool, 'error': str|None}."""
     try:
         smtp_cfg = _load_smtp_config(base_dir)
+        username, password, from_address = _get_credentials(base_dir)
+
+        # Use SendGrid if API key is set (works on Railway where SMTP ports are blocked)
+        sendgrid_key = os.environ.get('SENDGRID_API_KEY', '')
+        if sendgrid_key:
+            if not from_address:
+                return {'success': False, 'error': 'No from address configured'}
+            result = _send_via_sendgrid(sendgrid_key, from_address, smtp_cfg['from_name'],
+                                        to_address, subject, body_text, body_html)
+            if result['success']:
+                logger.info("Email sent via SendGrid to %s: %s", to_address, subject)
+            else:
+                logger.warning("SendGrid send failed to %s: %s", to_address, result['error'])
+            return result
+
         if not smtp_cfg['host']:
             return {'success': False, 'error': 'SMTP host not configured'}
-
-        username, password, from_address = _get_credentials(base_dir)
         if not from_address:
             return {'success': False, 'error': 'No from address configured'}
 

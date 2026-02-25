@@ -1202,11 +1202,11 @@
                 <div id="emailSettingsBody" style="display:none;padding-top:12px">
                     <!-- SMTP Status -->
                     <div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:8px">
-                        <div style="font-weight:600;font-size:13px;margin-bottom:8px">SMTP Status</div>
+                        <div style="font-weight:600;font-size:13px;margin-bottom:8px">Email Status</div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                             <span id="smtpStatusBadge" style="font-size:12px;padding:3px 8px;border-radius:4px;background:var(--border);color:var(--text-muted)">Checking...</span>
                             <span id="smtpHostInfo" style="font-size:12px;color:var(--text-muted)"></span>
-                            <button class="btn btn-ghost btn-sm" onclick="testSmtp()" style="font-size:11px">Test SMTP</button>
+                            <button class="btn btn-ghost btn-sm" onclick="testSmtp()" style="font-size:11px">Test Email</button>
                         </div>
                     </div>
 
@@ -2976,12 +2976,16 @@ function toggleEmailSettings(){
 function fetchEmailSettings(){
     fetch('/api/settings/smtp').then(function(r){return r.json();}).then(function(d){
         var badge=document.getElementById('smtpStatusBadge');
-        if(d.smtp_configured){
-            badge.textContent='Configured';badge.style.background='#dcfce7';badge.style.color='#166534';
+        if(d.email_provider==='sendgrid'){
+            badge.textContent='SendGrid';badge.style.background='#dbeafe';badge.style.color='#1e40af';
+            document.getElementById('smtpHostInfo').textContent='Sending via SendGrid API';
+        } else if(d.smtp_configured){
+            badge.textContent='SMTP';badge.style.background='#dcfce7';badge.style.color='#166534';
+            document.getElementById('smtpHostInfo').textContent=d.smtp_host?(d.smtp_host+':'+d.smtp_port+(d.smtp_use_ssl?' (SSL)':d.smtp_use_tls?' (TLS)':'')):'';
         } else {
             badge.textContent='Not configured';badge.style.background='#fef3c7';badge.style.color='#92400e';
+            document.getElementById('smtpHostInfo').textContent='';
         }
-        document.getElementById('smtpHostInfo').textContent=d.smtp_host?(d.smtp_host+':'+d.smtp_port+(d.smtp_use_ssl?' (SSL)':d.smtp_use_tls?' (TLS)':'')):'';
         document.getElementById('smtpEnabledCb').checked=d.smtp_enabled;
         document.getElementById('ackEnabledCb').checked=d.ack_enabled;
         document.getElementById('reminderEnabledCb').checked=d.reminder_enabled;

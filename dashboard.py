@@ -2150,8 +2150,10 @@ def api_smtp_settings():
     try:
         from email_interface.smtp_sender import _load_smtp_config
         cfg = _load_smtp_config(BASE_DIR)
+        sendgrid_key = os.environ.get('SENDGRID_API_KEY', '')
+        email_provider = 'sendgrid' if sendgrid_key else ('smtp' if cfg['host'] else 'none')
         return jsonify({
-            'smtp_configured': bool(cfg['host']),
+            'smtp_configured': bool(cfg['host']) or bool(sendgrid_key),
             'smtp_host': cfg['host'],
             'smtp_port': cfg['port'],
             'smtp_use_ssl': cfg.get('use_ssl', False),
@@ -2159,6 +2161,7 @@ def api_smtp_settings():
             'smtp_enabled': tracker.get_setting('smtp_enabled') == 'true',
             'ack_enabled': tracker.get_setting('ack_enabled') == 'true',
             'reminder_enabled': tracker.get_setting('reminder_enabled') == 'true',
+            'email_provider': email_provider,
         })
     finally:
         tracker.close()
