@@ -37,12 +37,16 @@ excel:
   output_path: "logs/correspondence_log.xlsx"
 
 # SMTP Settings (for sending acknowledgments and reminders)
-# Reuses IMAP auth credentials by default. Override with env vars: SMTP_HOST, SMTP_PORT, SMTP_USE_TLS
+# Reuses IMAP auth credentials by default.
+# Override with env vars: SMTP_HOST, SMTP_PORT, SMTP_USE_SSL, SMTP_USE_TLS
+# Port 465 (SSL) is recommended for cloud hosting (Railway, Heroku, etc.)
+# Port 587 (STARTTLS) works on local/VPS but is often blocked on cloud platforms
 smtp:
   enabled: false
   smtp_host: smtp.gmail.com
-  smtp_port: 587
-  use_tls: true
+  smtp_port: 465
+  use_ssl: true
+  use_tls: false
   from_name: "Document Control"
 
 # Logging

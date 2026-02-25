@@ -2148,14 +2148,14 @@ def api_smtp_settings():
     """Return SMTP config status (not passwords)."""
     tracker = _get_tracker()
     try:
-        from email_interface.config import load_config, resolve_path
-        email_cfg = load_config(resolve_path('config/email_config.yaml', BASE_DIR))
-        smtp = email_cfg.get('smtp', {})
-        smtp_host = os.environ.get('SMTP_HOST', smtp.get('smtp_host', ''))
+        from email_interface.smtp_sender import _load_smtp_config
+        cfg = _load_smtp_config(BASE_DIR)
         return jsonify({
-            'smtp_configured': bool(smtp_host),
-            'smtp_host': smtp_host,
-            'smtp_port': int(os.environ.get('SMTP_PORT', smtp.get('smtp_port', 587))),
+            'smtp_configured': bool(cfg['host']),
+            'smtp_host': cfg['host'],
+            'smtp_port': cfg['port'],
+            'smtp_use_ssl': cfg.get('use_ssl', False),
+            'smtp_use_tls': cfg.get('use_tls', True),
             'smtp_enabled': tracker.get_setting('smtp_enabled') == 'true',
             'ack_enabled': tracker.get_setting('ack_enabled') == 'true',
             'reminder_enabled': tracker.get_setting('reminder_enabled') == 'true',

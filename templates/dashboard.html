@@ -2981,7 +2981,7 @@ function fetchEmailSettings(){
         } else {
             badge.textContent='Not configured';badge.style.background='#fef3c7';badge.style.color='#92400e';
         }
-        document.getElementById('smtpHostInfo').textContent=d.smtp_host?d.smtp_host+':'+d.smtp_port:'';
+        document.getElementById('smtpHostInfo').textContent=d.smtp_host?(d.smtp_host+':'+d.smtp_port+(d.smtp_use_ssl?' (SSL)':d.smtp_use_tls?' (TLS)':'')):'';
         document.getElementById('smtpEnabledCb').checked=d.smtp_enabled;
         document.getElementById('ackEnabledCb').checked=d.ack_enabled;
         document.getElementById('reminderEnabledCb').checked=d.reminder_enabled;

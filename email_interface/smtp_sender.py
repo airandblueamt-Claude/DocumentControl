@@ -73,11 +73,19 @@ def _load_smtp_config(base_dir):
     from email_interface.config import load_config, resolve_path
     email_cfg = load_config(resolve_path('config/email_config.yaml', base_dir))
     smtp = email_cfg.get('smtp', {})
+    port = int(os.environ.get('SMTP_PORT', smtp.get('smtp_port', 465)))
+    use_ssl_env = os.environ.get('SMTP_USE_SSL', '').lower()
+    if use_ssl_env:
+        use_ssl = use_ssl_env in ('true', '1', 'yes')
+    else:
+        # Auto-detect: port 465 = SSL, port 587 = STARTTLS
+        use_ssl = smtp.get('use_ssl', port == 465)
     return {
         'enabled': smtp.get('enabled', False),
         'host': os.environ.get('SMTP_HOST', smtp.get('smtp_host', '')),
-        'port': int(os.environ.get('SMTP_PORT', smtp.get('smtp_port', 587))),
+        'port': port,
         'use_tls': os.environ.get('SMTP_USE_TLS', str(smtp.get('use_tls', True))).lower() in ('true', '1', 'yes'),
+        'use_ssl': use_ssl,
         'from_name': smtp.get('from_name', 'Document Control'),
     }
 
@@ -120,11 +128,18 @@ def send_email(base_dir, to_address, subject, body_text, body_html=None, reply_t
         if reply_to:
             msg['Reply-To'] = reply_to
 
-        if smtp_cfg['use_tls']:
-            server = smtplib.SMTP(smtp_cfg['host'], smtp_cfg['port'], timeout=30)
+        host = smtp_cfg['host']
+        port = smtp_cfg['port']
+
+        if smtp_cfg.get('use_ssl'):
+            # SSL connection (port 465) — encrypted from the start
+            server = smtplib.SMTP_SSL(host, port, timeout=30)
+        elif smtp_cfg['use_tls']:
+            # STARTTLS (port 587) — plain then upgrade
+            server = smtplib.SMTP(host, port, timeout=30)
             server.starttls()
         else:
-            server = smtplib.SMTP(smtp_cfg['host'], smtp_cfg['port'], timeout=30)
+            server = smtplib.SMTP(host, port, timeout=30)
 
         if username and password:
             server.login(username, password)
@@ -134,6 +149,16 @@ def send_email(base_dir, to_address, subject, body_text, body_html=None, reply_t
 
         logger.info("Email sent to %s: %s", to_address, subject)
         return {'success': True, 'error': None}
+
+    except OSError as e:
+        # Network errors (Errno 101 = unreachable, 111 = refused, etc.)
+        hint = ''
+        if '101' in str(e) or 'unreachable' in str(e).lower():
+            hint = ' — port may be blocked by hosting provider. Try SMTP_PORT=465 with SMTP_USE_SSL=true'
+        elif '111' in str(e) or 'refused' in str(e).lower():
+            hint = ' — SMTP server refused connection. Check host/port settings'
+        logger.warning("SMTP connection failed to %s: %s%s", to_address, e, hint)
+        return {'success': False, 'error': f'{e}{hint}'}
 
     except Exception as e:
         logger.warning("SMTP send failed to %s: %s", to_address, e)
