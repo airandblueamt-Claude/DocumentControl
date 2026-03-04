@@ -1671,9 +1671,7 @@ class ProcessingTracker:
             row = self._conn.execute(
                 """SELECT COUNT(*) as total,
                           AVG(quality_score) as avg_score,
-                          AVG(CASE WHEN vote_count > 0
-                              THEN CAST(agree_count AS REAL) / vote_count
-                              ELSE 0 END) as agreement_rate
+                          AVG(CAST(agree_count AS REAL) / 5.0) as agreement_rate
                    FROM judge_results"""
             ).fetchone()
             return {
@@ -1704,7 +1702,7 @@ class ProcessingTracker:
                 if pid not in result:  # keep most recent
                     result[pid] = {
                         'score': row['quality_score'],
-                        'all_agree': row['agree_count'] == row['vote_count'] and row['vote_count'] > 0,
+                        'all_agree': row['agree_count'] == 5,
                     }
             self._conn.row_factory = None
             return result

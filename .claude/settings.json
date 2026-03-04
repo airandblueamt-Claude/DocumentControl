@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(while IFS='=' read -r key val)",
+      "Bash(do)",
+      "Bash(if [ -z \"$val\" ])",
+      "Bash(then)",
+      "Bash(echo \"$key: EMPTY\")",
+      "Bash(else)",
+      "Bash(echo \"$key: SET \\($val:0:8...\\)\")",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(pip install groq anthropic)"
+    ]
+  }
+}

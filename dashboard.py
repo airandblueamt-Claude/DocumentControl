@@ -22,6 +22,18 @@ from openpyxl import Workbook
 import re
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Load .env file if present (local dev)
+_env_path = os.path.join(BASE_DIR, '.env')
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _, _val = _line.partition('=')
+                _key, _val = _key.strip(), _val.strip()
+                if _val and _key not in os.environ:
+                    os.environ[_key] = _val
 logger = logging.getLogger(__name__)
 
 # Only show document attachments in the UI (filter out images, signatures, etc.)
@@ -1243,9 +1255,10 @@ def _run_judge_background():
         try:
             departments = tracker.get_departments(active_only=True)
             contacts = tracker.get_contacts(active_only=True)
+            class_cfg = _get_class_cfg()
 
             from email_interface.judge import create_judge
-            judge = create_judge(tracker, departments, contacts)
+            judge = create_judge(tracker, class_cfg, departments, contacts)
             if not judge:
                 judge_state['status'] = 'idle'
                 judge_state['last_run_result'] = 'No API keys available'

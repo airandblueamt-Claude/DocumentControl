@@ -676,7 +676,7 @@ class ClaudeAPIClassifier(LLMClassifierBase):
             )
 
         self._client = _anthropic.Anthropic(api_key=api_key)
-        self._model = claude_cfg.get('model', 'claude-sonnet-4-5-20250929')
+        self._model = claude_cfg.get('model', 'claude-sonnet-4-6')
         self._max_body_chars = claude_cfg.get('max_body_chars', 2000)
         self._fallback_on_error = claude_cfg.get('fallback_on_error', True)
 

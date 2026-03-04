@@ -1652,7 +1652,7 @@ var currentModalId = null;
 var modalBodyFull = '', modalBodySummary = '', modalBodyHtml = '', showingFullBody = false, currentBodyView = 'text';
 var pendingPage = 0, processedPage = 0;
 var PAGE_SIZE = 15;
-var JUDGE_FIELDS_COUNT = 4;
+var JUDGE_FIELDS_COUNT = 5;
 var isMobile = window.innerWidth < 768;
 window.addEventListener('resize', function(){ isMobile = window.innerWidth < 768; });
 
@@ -2329,7 +2329,7 @@ function openDetailModal(id){
             jh+='<span style="font-size:11px;color:var(--text-muted)">Model: '+(jr.judge_model||'--')+'</span>';
             jh+='</div>';
             var fv=jr.field_verdicts||{}, fs=jr.field_scores||{}, sc=jr.suggested_corrections||{};
-            var fields=['doc_type','discipline','department','response_required'];
+            var fields=['in_scope','doc_type','discipline','department','response_required'];
             for(var fi=0;fi<fields.length;fi++){
                 var fn=fields[fi];
                 var verdict=fv[fn]||'--';
