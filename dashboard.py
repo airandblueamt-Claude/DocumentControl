@@ -138,6 +138,15 @@ scan_progress = {
     'current_subject': '', 'phase': '',
 }
 
+# --- Judge state (shared across threads) ---
+judge_lock = threading.Lock()
+judge_state = {
+    'status': 'idle',         # idle | running | error
+    'last_run_time': None,
+    'last_run_result': None,
+    'progress': {'current': 0, 'total': 0},
+}
+
 # --- Logging setup (run once) ---
 _logging_initialized = False
 
@@ -301,6 +310,19 @@ def run_scan():
         scan_state['classifiers_used'] = classifiers_used
         scan_progress['active'] = False
         logger.info("Dashboard: scan complete - %s", scan_state['last_scan_result'])
+
+        # Post-scan: auto-run judge if setting enabled and emails were queued
+        if counts['queued'] > 0:
+            try:
+                auto_judge = _get_tracker()
+                try:
+                    if auto_judge.get_setting('judge_auto_run') == '1':
+                        threading.Thread(target=_run_judge_background, daemon=True).start()
+                        logger.info("Dashboard: auto-triggered judge after scan")
+                finally:
+                    auto_judge.close()
+            except Exception as je:
+                logger.warning("Dashboard: auto-judge trigger failed: %s", je)
 
     except Exception as e:
         scan_state['status'] = 'error'
@@ -1005,6 +1027,13 @@ def api_pending():
             conv_id = email.get('conversation_id')
             email['thread_count'] = tracker.get_thread_count(conv_id) if conv_id else 0
             email['conversation_position'] = email.get('conversation_position', 1)
+        # Bulk-attach judge scores (single query, no N+1)
+        pending_ids = [e['id'] for e in pending]
+        judge_scores = tracker.get_judge_scores_batch(pending_ids)
+        for email in pending:
+            js = judge_scores.get(email['id'])
+            email['judge_score'] = js['score'] if js else None
+            email['judge_all_agree'] = js['all_agree'] if js else None
         return jsonify({'emails': pending, 'stats': stats})
     finally:
         tracker.close()
@@ -1197,6 +1226,117 @@ def api_accuracy():
         return jsonify(stats)
     finally:
         tracker.close()
+
+
+# --- Judge Routes ---
+
+def _run_judge_background():
+    """Run judge in background thread (same pattern as run_scan)."""
+    if not judge_lock.acquire(blocking=False):
+        return  # Already running
+
+    try:
+        judge_state['status'] = 'running'
+        judge_state['progress'] = {'current': 0, 'total': 0}
+
+        tracker = _get_tracker()
+        try:
+            departments = tracker.get_departments(active_only=True)
+            contacts = tracker.get_contacts(active_only=True)
+
+            from email_interface.judge import create_judge
+            judge = create_judge(tracker, departments, contacts)
+            if not judge:
+                judge_state['status'] = 'idle'
+                judge_state['last_run_result'] = 'No API keys available'
+                return
+
+            def progress_cb(current, total):
+                judge_state['progress'] = {'current': current, 'total': total}
+
+            result = judge.run_unjudged(limit=20, progress_callback=progress_cb)
+            judge_state['status'] = 'idle'
+            judge_state['last_run_time'] = datetime.now().isoformat()
+            judge_state['last_run_result'] = (
+                f"{result['judged']} judged, {result['errors']} errors "
+                f"(of {result['total']} total)"
+            )
+            logger.info("Judge complete: %s", judge_state['last_run_result'])
+        finally:
+            tracker.close()
+
+    except Exception as e:
+        judge_state['status'] = 'error'
+        judge_state['last_run_time'] = datetime.now().isoformat()
+        judge_state['last_run_result'] = str(e)
+        logger.error("Judge failed: %s", e, exc_info=True)
+    finally:
+        judge_lock.release()
+
+
+@app.route('/api/judge/stats')
+def api_judge_stats():
+    """Aggregate quality metrics from judge results."""
+    tracker = _get_tracker()
+    try:
+        stats = tracker.get_judge_stats()
+        return jsonify(stats)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/judge/results')
+def api_judge_results():
+    """List recent judge results."""
+    limit = int(request.args.get('limit', 50))
+    judge_type = request.args.get('judge_type')
+    tracker = _get_tracker()
+    try:
+        results = tracker.get_judge_results(limit=limit, judge_type=judge_type)
+        return jsonify({'results': results})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/judge/results/<int:pending_id>')
+def api_judge_result_for_email(pending_id):
+    """Get judge result for a specific pending email."""
+    tracker = _get_tracker()
+    try:
+        result = tracker.get_judge_result_for_email(pending_id)
+        if not result:
+            return jsonify({'result': None})
+        # Parse JSON strings for frontend
+        for fld in ('field_scores', 'field_verdicts', 'suggested_corrections', 'raw_responses'):
+            val = result.get(fld)
+            if isinstance(val, str):
+                try:
+                    result[fld] = json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return jsonify({'result': result})
+    finally:
+        tracker.close()
+
+
+@app.route('/api/judge/run', methods=['POST'])
+def api_judge_run():
+    """Trigger judge in a background thread."""
+    if judge_state['status'] == 'running':
+        return jsonify({'message': 'Judge is already running'}), 409
+    threading.Thread(target=_run_judge_background, daemon=True).start()
+    return jsonify({'message': 'Judge started'})
+
+
+@app.route('/api/judge/status')
+def api_judge_status():
+    """Poll judge progress."""
+    return jsonify({
+        'status': judge_state['status'],
+        'last_run_time': judge_state['last_run_time'],
+        'last_run_result': judge_state['last_run_result'],
+        'progress': judge_state['progress'],
+    })
 
 
 @app.route('/api/contacts/suggested')

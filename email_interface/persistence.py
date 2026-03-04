@@ -147,6 +147,26 @@ CREATE TABLE IF NOT EXISTS sent_emails (
     error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS judge_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pending_email_id INTEGER,
+    message_id TEXT,
+    judge_model TEXT,
+    primary_classifier TEXT,
+    quality_score REAL,
+    field_scores TEXT,
+    field_verdicts TEXT,
+    suggested_corrections TEXT,
+    reasoning TEXT,
+    judge_type TEXT,
+    raw_responses TEXT,
+    vote_count INTEGER DEFAULT 1,
+    agree_count INTEGER DEFAULT 0,
+    judged_at TIMESTAMP,
+    FOREIGN KEY (pending_email_id) REFERENCES pending_emails(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_judge_pending ON judge_results(pending_email_id);
 CREATE INDEX IF NOT EXISTS idx_projects_number ON projects(project_number);
 CREATE INDEX IF NOT EXISTS idx_projects_year ON projects(year);
 CREATE INDEX IF NOT EXISTS idx_sent_emails_transmittal ON sent_emails(transmittal_no);
@@ -189,6 +209,10 @@ _MIGRATIONS = [
     ("processed_messages", "team_reminder_sent_at", "TIMESTAMP"),
     ("processed_messages", "team_completed", "INTEGER DEFAULT 0"),
     ("processed_messages", "team_completed_at", "TIMESTAMP"),
+    ("judge_results", "field_scores", "TEXT"),
+    ("judge_results", "raw_responses", "TEXT"),
+    ("judge_results", "vote_count", "INTEGER DEFAULT 1"),
+    ("judge_results", "agree_count", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -1563,6 +1587,129 @@ class ProcessingTracker:
             (message_id,),
         )
         self._conn.commit()
+
+    # --- Judge Results ---
+
+    def store_judge_result(self, pending_email_id, message_id, judge_model,
+                           primary_classifier, quality_score, field_scores,
+                           field_verdicts, suggested_corrections, reasoning,
+                           judge_type, raw_responses, vote_count, agree_count):
+        """Store an LLM-as-Judge result."""
+        try:
+            self._conn.execute(
+                """INSERT INTO judge_results
+                   (pending_email_id, message_id, judge_model, primary_classifier,
+                    quality_score, field_scores, field_verdicts, suggested_corrections,
+                    reasoning, judge_type, raw_responses, vote_count, agree_count, judged_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (pending_email_id, message_id, judge_model, primary_classifier,
+                 quality_score,
+                 json.dumps(field_scores) if isinstance(field_scores, dict) else field_scores,
+                 json.dumps(field_verdicts) if isinstance(field_verdicts, dict) else field_verdicts,
+                 json.dumps(suggested_corrections) if isinstance(suggested_corrections, dict) else suggested_corrections,
+                 reasoning, judge_type,
+                 json.dumps(raw_responses) if isinstance(raw_responses, list) else raw_responses,
+                 vote_count, agree_count, datetime.now().isoformat()),
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError as e:
+            logger.error("Failed to store judge result: %s", e)
+
+    def get_judge_results(self, limit=50, judge_type=None):
+        """List recent judge results with email info."""
+        try:
+            self._conn.row_factory = sqlite3.Row
+            query = """SELECT j.*, pe.subject, pe.sender, pe.sender_name
+                       FROM judge_results j
+                       LEFT JOIN pending_emails pe ON j.pending_email_id = pe.id"""
+            params = []
+            if judge_type:
+                query += " WHERE j.judge_type = ?"
+                params.append(judge_type)
+            query += " ORDER BY j.judged_at DESC LIMIT ?"
+            params.append(limit)
+            cur = self._conn.execute(query, params)
+            rows = [dict(row) for row in cur.fetchall()]
+            self._conn.row_factory = None
+            return rows
+        except sqlite3.OperationalError:
+            return []
+
+    def get_judge_result_for_email(self, pending_email_id):
+        """Get the most recent judge result for a pending email."""
+        try:
+            self._conn.row_factory = sqlite3.Row
+            cur = self._conn.execute(
+                """SELECT * FROM judge_results
+                   WHERE pending_email_id = ?
+                   ORDER BY judged_at DESC LIMIT 1""",
+                (pending_email_id,),
+            )
+            row = cur.fetchone()
+            self._conn.row_factory = None
+            return dict(row) if row else None
+        except sqlite3.OperationalError:
+            return None
+
+    def get_unjudged_pending_ids(self, limit=20):
+        """Find pending_review emails without judge results."""
+        try:
+            cur = self._conn.execute(
+                """SELECT pe.id FROM pending_emails pe
+                   LEFT JOIN judge_results j ON pe.id = j.pending_email_id
+                   WHERE pe.status = 'pending_review' AND j.id IS NULL
+                   ORDER BY pe.scanned_at DESC LIMIT ?""",
+                (limit,),
+            )
+            return [row[0] for row in cur.fetchall()]
+        except sqlite3.OperationalError:
+            return []
+
+    def get_judge_stats(self):
+        """Aggregate judge stats: total judged, avg score, agreement rate."""
+        try:
+            row = self._conn.execute(
+                """SELECT COUNT(*) as total,
+                          AVG(quality_score) as avg_score,
+                          AVG(CASE WHEN vote_count > 0
+                              THEN CAST(agree_count AS REAL) / vote_count
+                              ELSE 0 END) as agreement_rate
+                   FROM judge_results"""
+            ).fetchone()
+            return {
+                'total_judged': row[0] or 0,
+                'avg_score': round(row[1], 2) if row[1] else 0,
+                'agreement_rate': round(row[2], 2) if row[2] else 0,
+            }
+        except sqlite3.OperationalError:
+            return {'total_judged': 0, 'avg_score': 0, 'agreement_rate': 0}
+
+    def get_judge_scores_batch(self, pending_ids):
+        """Bulk fetch judge scores for the review queue. Returns {id: {score, all_agree}}."""
+        if not pending_ids:
+            return {}
+        try:
+            placeholders = ','.join(['?'] * len(pending_ids))
+            self._conn.row_factory = sqlite3.Row
+            cur = self._conn.execute(
+                f"""SELECT pending_email_id, quality_score, vote_count, agree_count
+                    FROM judge_results
+                    WHERE pending_email_id IN ({placeholders})
+                    ORDER BY judged_at DESC""",
+                pending_ids,
+            )
+            result = {}
+            for row in cur.fetchall():
+                pid = row['pending_email_id']
+                if pid not in result:  # keep most recent
+                    result[pid] = {
+                        'score': row['quality_score'],
+                        'all_agree': row['agree_count'] == row['vote_count'] and row['vote_count'] > 0,
+                    }
+            self._conn.row_factory = None
+            return result
+        except sqlite3.OperationalError:
+            return {}
 
     def close(self):
         self._conn.close()

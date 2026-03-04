@@ -56,6 +56,11 @@
         [data-theme="dark"] .ai-badge.conf-mid { background: #78350f; color: #fcd34d; }
         [data-theme="dark"] .ai-badge.conf-low { background: #7f1d1d; color: #fca5a5; }
         [data-theme="dark"] .ai-badge.conf-none { background: #334155; color: var(--text-muted); }
+        [data-theme="dark"] .judge-high { background: #064e3b; color: #6ee7b7; }
+        [data-theme="dark"] .judge-mid { background: #78350f; color: #fcd34d; }
+        [data-theme="dark"] .judge-low { background: #7f1d1d; color: #fca5a5; }
+        [data-theme="dark"] .judge-none { background: #334155; color: var(--text-muted); }
+        [data-theme="dark"] .judge-detail { background: var(--card); border-color: var(--border); }
         [data-theme="dark"] .filter-pill { background: #0f172a; border-color: var(--border); color: var(--text-muted); }
         [data-theme="dark"] .filter-pill:hover { border-color: var(--primary); }
         [data-theme="dark"] .filter-pill.active { background: var(--primary); color: #fff; border-color: var(--primary); }
@@ -822,6 +827,24 @@
         .ai-badge.conf-none { background: #f1f5f9; color: var(--text-muted); }
         .ai-badge.conf-none .ai-dot { background: var(--text-light); }
 
+        /* Judge quality badges */
+        .judge-badge {
+            display: inline-block; font-size: 10px; font-weight: 600;
+            padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+        }
+        .judge-high { background: #dcfce7; color: #166534; }
+        .judge-mid { background: #fef3c7; color: #92400e; }
+        .judge-low { background: #fee2e2; color: #991b1b; }
+        .judge-none { background: #f1f5f9; color: var(--text-muted); }
+        .judge-detail { margin-top: 16px; padding: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+        .judge-detail h4 { margin: 0 0 8px; font-size: 13px; color: var(--text-muted); }
+        .judge-field-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
+        .judge-field-row:last-child { border-bottom: none; }
+        .judge-field-name { width: 120px; font-weight: 600; }
+        .judge-verdict-agree { color: #16a34a; font-weight: 600; }
+        .judge-verdict-disagree { color: #dc2626; font-weight: 600; }
+        .judge-correction { color: var(--accent); font-style: italic; margin-left: 8px; }
+
         /* AI Instructions section */
         .ai-instructions { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
         .ai-instructions-header {
@@ -1085,6 +1108,10 @@
                     <div class="kpi-value text-warn" id="kpiRejected">--</div>
                     <div class="kpi-label">Rejected</div>
                 </div>
+                <div class="kpi-card border-purple" id="kpiJudgeCard" style="display:none">
+                    <div class="kpi-value" id="kpiJudgeScore">--</div>
+                    <div class="kpi-label">Avg Quality</div>
+                </div>
             </div>
 
             <!-- Main grid -->
@@ -1313,6 +1340,7 @@
                         <button class="btn btn-primary btn-scan" id="btnScan" onclick="triggerScan()">Scan Now</button>
                         <button class="btn btn-ghost btn-scan" id="btnScanAll" onclick="triggerScanAll()" title="Scan ALL emails in inbox (read + unread) — use once to catch everything">Scan All Emails</button>
                         <button class="btn btn-ghost btn-scan" id="btnReclassify" onclick="triggerReclassify()" title="Re-run classification on pending emails using current departments, contacts, and rules" style="border-color:var(--accent);">Re-classify</button>
+                        <button class="btn btn-ghost btn-scan" id="btnJudge" onclick="triggerJudge()" title="Run quality judge on unjudged pending emails" style="border-color:#8b5cf6;">Run Judge</button>
                     </div>
                 </div>
                 <div class="control-card classifier">
@@ -1624,6 +1652,7 @@ var currentModalId = null;
 var modalBodyFull = '', modalBodySummary = '', modalBodyHtml = '', showingFullBody = false, currentBodyView = 'text';
 var pendingPage = 0, processedPage = 0;
 var PAGE_SIZE = 15;
+var JUDGE_FIELDS_COUNT = 4;
 var isMobile = window.innerWidth < 768;
 window.addEventListener('resize', function(){ isMobile = window.innerWidth < 768; });
 
@@ -1699,6 +1728,16 @@ function renderAiBadge(method, confidence) {
     var label = esc(method);
     if (pct !== null) label += ' \u00b7 ' + pct + '%';
     return '<span class="ai-badge ' + cls + '"><span class="ai-dot"></span>' + label + '</span>';
+}
+
+function renderJudgeBadge(score, allAgree) {
+    if (score == null) return '<span class="judge-badge judge-none">--</span>';
+    var pct = Math.round(score * 100);
+    var cls = 'judge-low';
+    if (pct >= 80) cls = 'judge-high';
+    else if (pct >= 50) cls = 'judge-mid';
+    var agree = allAgree ? ' &#10003;' : '';
+    return '<span class="judge-badge ' + cls + '">' + pct + '%' + agree + '</span>';
 }
 
 function renderThreadBadges(e) {
@@ -1866,6 +1905,35 @@ function triggerReclassify() {
         startScanPolling();
     }).catch(function(){btn.disabled=false;btn.textContent='Re-classify';btnMain.disabled=false;if(btnAll)btnAll.disabled=false;});
 }
+function triggerJudge() {
+    var btn=document.getElementById('btnJudge'); btn.disabled=true; btn.textContent='Starting...';
+    fetch('/api/judge/run',{method:'POST'}).then(function(r){
+        if(r.status===409){btn.textContent='Already running';setTimeout(function(){btn.disabled=false;btn.textContent='Run Judge';},2000);return;}
+        return r.json();
+    }).then(function(d){
+        if(d) showToast('Judge started — evaluating classifications','info');
+        startJudgePolling();
+    }).catch(function(){btn.disabled=false;btn.textContent='Run Judge';});
+}
+var judgePollTimer=null;
+function startJudgePolling(){
+    var btn=document.getElementById('btnJudge');
+    if(judgePollTimer)clearInterval(judgePollTimer);
+    judgePollTimer=setInterval(function(){
+        fetch('/api/judge/status').then(function(r){return r.json();}).then(function(d){
+            if(d.status==='running'){
+                var p=d.progress||{};
+                btn.textContent='Judging '+(p.current||0)+'/'+(p.total||'?');
+            } else {
+                clearInterval(judgePollTimer); judgePollTimer=null;
+                btn.disabled=false; btn.textContent='Run Judge';
+                if(d.last_run_result) showToast('Judge: '+d.last_run_result,'success');
+                fetchPending(); fetchJudgeStats();
+            }
+        });
+    },3000);
+}
+
 var scanPollTimer=null;
 function startScanPolling(){
     if(scanPollTimer)clearInterval(scanPollTimer);
@@ -2031,6 +2099,7 @@ function renderPendingTable() {
     html+='<th style="width:30px">#</th><th>Date</th><th>From</th><th>CC</th><th>Subject</th>';
     if(isReview) html+='<th>Att.</th><th>Type</th><th>Discipline</th><th>Assign To</th>';
     html+='<th>AI</th>';
+    if(isReview) html+='<th>Quality</th>';
     html+='<th>Actions</th>';
     html+='</tr></thead><tbody>';
     for(var i=0;i<pg.items.length;i++){
@@ -2054,6 +2123,7 @@ function renderPendingTable() {
                 '<td><select class="inline-select" data-id="'+e.id+'" data-field="assigned_to"><option value="">-- Select --</option>'+makeTeamOptions(e.assigned_to)+'</select></td>';
         }
         html+='<td>'+renderAiBadge(e.classifier_method, e.confidence)+'</td>';
+        if(isReview) html+='<td>'+renderJudgeBadge(e.judge_score, e.judge_all_agree)+'</td>';
         if(isReview){
             html+='<td class="col-actions"><div class="row-actions">';
             if(e.confidence>=0.8 && e.classifier_method && e.classifier_method!=='Keywords'){
@@ -2245,6 +2315,36 @@ function openDetailModal(id){
             }
             h+='</div></div>';
         }
+        // Quality Assessment (Judge) — placeholder div, loaded async
+        h+='<div id="judgeDetailSection"></div>';
+        // Fetch judge result for this email
+        fetch('/api/judge/results/'+e.id).then(function(r){return r.json();}).then(function(jd){
+            var sec=document.getElementById('judgeDetailSection');
+            if(!sec||!jd.result) return;
+            var jr=jd.result;
+            var jh='<div class="judge-detail"><h4>Quality Assessment</h4>';
+            jh+='<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">';
+            jh+='<span>Overall: '+renderJudgeBadge(jr.quality_score, jr.agree_count===jr.vote_count && jr.vote_count>0)+'</span>';
+            jh+='<span style="font-size:11px;color:var(--text-muted)">'+jr.vote_count+' votes, '+jr.agree_count+'/'+JUDGE_FIELDS_COUNT+' fields agreed</span>';
+            jh+='<span style="font-size:11px;color:var(--text-muted)">Model: '+(jr.judge_model||'--')+'</span>';
+            jh+='</div>';
+            var fv=jr.field_verdicts||{}, fs=jr.field_scores||{}, sc=jr.suggested_corrections||{};
+            var fields=['doc_type','discipline','department','response_required'];
+            for(var fi=0;fi<fields.length;fi++){
+                var fn=fields[fi];
+                var verdict=fv[fn]||'--';
+                var vClass=verdict==='agree'?'judge-verdict-agree':'judge-verdict-disagree';
+                jh+='<div class="judge-field-row">';
+                jh+='<span class="judge-field-name">'+fn+'</span>';
+                jh+='<span class="'+vClass+'">'+verdict+'</span>';
+                if(fs[fn]!=null) jh+=' <span style="font-size:11px;color:var(--text-muted)">'+Math.round(fs[fn]*100)+'%</span>';
+                if(sc[fn]) jh+='<span class="judge-correction">Suggested: '+esc(String(sc[fn]))+'</span>';
+                jh+='</div>';
+            }
+            if(jr.reasoning) jh+='<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">'+esc(jr.reasoning)+'</div>';
+            jh+='</div>';
+            sec.innerHTML=jh;
+        }).catch(function(){});
         // Conversation timeline
         if(e.thread_emails && e.thread_emails.length > 1){
             h+='<div class="modal-field"><div class="modal-field-label">Conversation Thread ('+e.thread_emails.length+' emails)</div>';
@@ -2716,6 +2816,22 @@ function renderKPIs(counts, attn){
     // Color overdue red if > 0
     var overdueEl = document.getElementById('kpiOverdue');
     overdueEl.className = 'kpi-value' + ((counts.overdue_responses || 0) > 0 ? ' text-danger' : ' text-success');
+    // Fetch judge stats for KPI card
+    fetchJudgeStats();
+}
+
+function fetchJudgeStats(){
+    fetch('/api/judge/stats').then(function(r){return r.json();}).then(function(d){
+        var card=document.getElementById('kpiJudgeCard');
+        var val=document.getElementById('kpiJudgeScore');
+        if(d.total_judged>0){
+            card.style.display='';
+            val.textContent=Math.round(d.avg_score*100)+'%';
+            val.title=d.total_judged+' judged, '+Math.round(d.agreement_rate*100)+'% agreement';
+        } else {
+            card.style.display='none';
+        }
+    }).catch(function(){});
 }
 
 function renderAttentionCard(attn){
