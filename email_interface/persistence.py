@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS processed_messages (
     discipline TEXT,
     department TEXT,
     response_required INTEGER DEFAULT 0,
-    references_json TEXT
+    references_json TEXT,
+    conversation_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS transmittal_sequence (
@@ -50,7 +51,9 @@ CREATE TABLE IF NOT EXISTS pending_emails (
     references_json TEXT,
     attachment_count INTEGER DEFAULT 0,
     transmittal_no TEXT,
-    attachment_folder TEXT
+    attachment_folder TEXT,
+    conversation_id INTEGER,
+    conversation_position INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS pending_attachments (
