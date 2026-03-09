@@ -170,6 +170,63 @@ CREATE INDEX IF NOT EXISTS idx_judge_pending ON judge_results(pending_email_id);
 CREATE INDEX IF NOT EXISTS idx_projects_number ON projects(project_number);
 CREATE INDEX IF NOT EXISTS idx_projects_year ON projects(year);
 CREATE INDEX IF NOT EXISTS idx_sent_emails_transmittal ON sent_emails(transmittal_no);
+
+CREATE TABLE IF NOT EXISTS document_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    category TEXT DEFAULT 'blank',
+    file_type TEXT,
+    filename TEXT NOT NULL,
+    content_type TEXT,
+    size INTEGER,
+    data BLOB,
+    uploaded_by TEXT DEFAULT '',
+    version INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'active',
+    tags TEXT DEFAULT '',
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_templates_category ON document_templates(category);
+CREATE INDEX IF NOT EXISTS idx_templates_status ON document_templates(status);
+
+CREATE TABLE IF NOT EXISTS form_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    form_type TEXT NOT NULL DEFAULT 'requisition',
+    form_number TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    form_data TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    approved_by TEXT DEFAULT NULL,
+    approved_at TIMESTAMP DEFAULT NULL,
+    share_token TEXT DEFAULT NULL,
+    template_id INTEGER DEFAULT NULL,
+    version INTEGER DEFAULT 1,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_form_submissions_status ON form_submissions(status);
+CREATE INDEX IF NOT EXISTS idx_form_submissions_type ON form_submissions(form_type);
+CREATE INDEX IF NOT EXISTS idx_form_submissions_token ON form_submissions(share_token);
+CREATE INDEX IF NOT EXISTS idx_form_submissions_number ON form_submissions(form_number);
+
+CREATE TABLE IF NOT EXISTS form_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    form_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    assignee_name TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    signed_at TIMESTAMP DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (form_id) REFERENCES form_submissions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_form_assignments_form ON form_assignments(form_id);
+CREATE INDEX IF NOT EXISTS idx_form_assignments_assignee ON form_assignments(assignee_name);
 """
 
 # Columns added after initial schema - handled via migration
@@ -1708,6 +1765,268 @@ class ProcessingTracker:
             return result
         except sqlite3.OperationalError:
             return {}
+
+    # --- Document Templates ---
+
+    def get_templates(self, category=None, status=None, search=None):
+        """List templates with optional filtering."""
+        sql = "SELECT id, name, description, category, file_type, filename, content_type, size, uploaded_by, version, status, tags, created_at, updated_at FROM document_templates WHERE 1=1"
+        params = []
+        if category:
+            sql += " AND category = ?"
+            params.append(category)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        if search:
+            sql += " AND (name LIKE ? OR description LIKE ? OR tags LIKE ?)"
+            params.extend([f'%{search}%'] * 3)
+        sql += " ORDER BY updated_at DESC"
+        self._conn.row_factory = sqlite3.Row
+        rows = self._conn.execute(sql, params).fetchall()
+        self._conn.row_factory = None
+        return [dict(r) for r in rows]
+
+    def get_template(self, template_id):
+        """Get a single template by ID (without blob data)."""
+        self._conn.row_factory = sqlite3.Row
+        row = self._conn.execute(
+            "SELECT id, name, description, category, file_type, filename, content_type, size, uploaded_by, version, status, tags, created_at, updated_at FROM document_templates WHERE id = ?",
+            (template_id,)
+        ).fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def get_template_file(self, template_id):
+        """Get template file data for download."""
+        self._conn.row_factory = sqlite3.Row
+        row = self._conn.execute(
+            "SELECT filename, content_type, data FROM document_templates WHERE id = ?",
+            (template_id,)
+        ).fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def add_template(self, name, description, category, filename, content_type, size, data, uploaded_by='', tags=''):
+        """Add a new template."""
+        now = datetime.now().isoformat()
+        ext = os.path.splitext(filename.lower())[1]
+        file_type = ext.lstrip('.')
+        cur = self._conn.execute(
+            """INSERT INTO document_templates (name, description, category, file_type, filename, content_type, size, data, uploaded_by, version, status, tags, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)""",
+            (name, description, category, file_type, filename, content_type, size, data, uploaded_by,
+             'pending_approval' if category == 'pending_approval' else 'active',
+             tags, now, now)
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def update_template(self, template_id, **fields):
+        """Update template metadata."""
+        allowed = {'name', 'description', 'category', 'status', 'tags', 'uploaded_by'}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        updates['updated_at'] = datetime.now().isoformat()
+        set_clause = ', '.join(f'{k} = ?' for k in updates)
+        self._conn.execute(
+            f"UPDATE document_templates SET {set_clause} WHERE id = ?",
+            list(updates.values()) + [template_id]
+        )
+        self._conn.commit()
+        return True
+
+    def delete_template(self, template_id):
+        """Delete a template."""
+        self._conn.execute("DELETE FROM document_templates WHERE id = ?", (template_id,))
+        self._conn.commit()
+
+    def update_template_file(self, template_id, filename, content_type, size, data):
+        """Upload a new version of a template file."""
+        now = datetime.now().isoformat()
+        ext = os.path.splitext(filename.lower())[1]
+        file_type = ext.lstrip('.')
+        self._conn.execute(
+            """UPDATE document_templates SET filename = ?, content_type = ?, size = ?, data = ?,
+               file_type = ?, version = version + 1, updated_at = ? WHERE id = ?""",
+            (filename, content_type, size, data, file_type, now, template_id)
+        )
+        self._conn.commit()
+
+    def get_template_stats(self):
+        """Get template counts by category."""
+        self._conn.row_factory = sqlite3.Row
+        rows = self._conn.execute(
+            "SELECT category, COUNT(*) as count FROM document_templates GROUP BY category"
+        ).fetchall()
+        self._conn.row_factory = None
+        stats = {r['category']: r['count'] for r in rows}
+        stats['total'] = sum(stats.values())
+        return stats
+
+    # --- Form Submissions ---
+
+    def get_form_submissions(self, status=None, form_type=None, search=None, assignee=None):
+        sql = """SELECT id, form_type, form_number, title, status, created_by,
+                 updated_by, approved_by, approved_at, template_id, version, created_at, updated_at
+                 FROM form_submissions WHERE 1=1"""
+        params = []
+        if assignee:
+            sql += " AND id IN (SELECT form_id FROM form_assignments WHERE assignee_name = ?)"
+            params.append(assignee)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        if form_type:
+            sql += " AND form_type = ?"
+            params.append(form_type)
+        if search:
+            sql += " AND (title LIKE ? OR form_number LIKE ? OR created_by LIKE ?)"
+            params.extend([f'%{search}%'] * 3)
+        sql += " ORDER BY updated_at DESC"
+        self._conn.row_factory = sqlite3.Row
+        rows = self._conn.execute(sql, params).fetchall()
+        self._conn.row_factory = None
+        forms = [dict(r) for r in rows]
+        # Attach assignment summary to each form
+        for f in forms:
+            self._conn.row_factory = sqlite3.Row
+            arows = self._conn.execute(
+                "SELECT role, assignee_name, status FROM form_assignments WHERE form_id = ?",
+                (f['id'],)
+            ).fetchall()
+            self._conn.row_factory = None
+            f['assignments'] = [dict(a) for a in arows]
+        return forms
+
+    def get_form_submission(self, form_id):
+        self._conn.row_factory = sqlite3.Row
+        row = self._conn.execute(
+            "SELECT * FROM form_submissions WHERE id = ?", (form_id,)
+        ).fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def get_form_by_token(self, token):
+        self._conn.row_factory = sqlite3.Row
+        row = self._conn.execute(
+            "SELECT * FROM form_submissions WHERE share_token = ?", (token,)
+        ).fetchone()
+        self._conn.row_factory = None
+        return dict(row) if row else None
+
+    def create_form_submission(self, form_type, form_number, title, form_data, created_by, template_id=None):
+        now = datetime.now().isoformat()
+        cur = self._conn.execute(
+            """INSERT INTO form_submissions
+               (form_type, form_number, title, form_data, status, created_by, updated_by, template_id, version, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, 1, ?, ?)""",
+            (form_type, form_number, title, form_data, created_by, created_by, template_id, now, now)
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def update_form_submission(self, form_id, **fields):
+        allowed = {'title', 'form_data', 'status', 'updated_by', 'approved_by', 'approved_at'}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        updates['updated_at'] = datetime.now().isoformat()
+        set_clause = ', '.join(f'{k} = ?' for k in updates)
+        self._conn.execute(
+            f"UPDATE form_submissions SET {set_clause} WHERE id = ?",
+            list(updates.values()) + [form_id]
+        )
+        self._conn.commit()
+        return True
+
+    def delete_form_submission(self, form_id):
+        self._conn.execute("DELETE FROM form_submissions WHERE id = ?", (form_id,))
+        self._conn.commit()
+
+    def set_form_share_token(self, form_id, token):
+        self._conn.execute(
+            "UPDATE form_submissions SET share_token = ?, updated_at = ? WHERE id = ?",
+            (token, datetime.now().isoformat(), form_id)
+        )
+        self._conn.commit()
+
+    def next_form_number(self):
+        year = datetime.now().year
+        row = self._conn.execute(
+            "SELECT MAX(CAST(SUBSTR(form_number, 10) AS INTEGER)) FROM form_submissions WHERE form_number LIKE ?",
+            (f'REQ-{year}-%',)
+        ).fetchone()
+        seq = (row[0] or 0) + 1
+        return f'REQ-{year}-{seq:04d}'
+
+    def get_form_stats(self):
+        self._conn.row_factory = sqlite3.Row
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) as count FROM form_submissions GROUP BY status"
+        ).fetchall()
+        self._conn.row_factory = None
+        stats = {r['status']: r['count'] for r in rows}
+        stats['total'] = sum(stats.values())
+        return stats
+
+    # --- Form Assignments ---
+
+    def get_form_assignments(self, form_id):
+        self._conn.row_factory = sqlite3.Row
+        rows = self._conn.execute(
+            "SELECT * FROM form_assignments WHERE form_id = ? ORDER BY role", (form_id,)
+        ).fetchall()
+        self._conn.row_factory = None
+        return [dict(r) for r in rows]
+
+    def get_assignments_by_user(self, assignee_name):
+        self._conn.row_factory = sqlite3.Row
+        rows = self._conn.execute(
+            """SELECT fa.*, fs.form_number, fs.title, fs.status as form_status
+               FROM form_assignments fa
+               JOIN form_submissions fs ON fa.form_id = fs.id
+               WHERE fa.assignee_name = ? ORDER BY fa.created_at DESC""",
+            (assignee_name,)
+        ).fetchall()
+        self._conn.row_factory = None
+        return [dict(r) for r in rows]
+
+    def set_form_assignments(self, form_id, assignments):
+        """Replace all assignments for a form. assignments = [{role, assignee_name}]"""
+        self._conn.execute("DELETE FROM form_assignments WHERE form_id = ?", (form_id,))
+        now = datetime.now().isoformat()
+        for a in assignments:
+            self._conn.execute(
+                """INSERT INTO form_assignments (form_id, role, assignee_name, status, created_at)
+                   VALUES (?, ?, ?, 'pending', ?)""",
+                (form_id, a['role'], a['assignee_name'], now)
+            )
+        self._conn.commit()
+
+    def sign_form_assignment(self, form_id, role, signer_name):
+        """Mark an assignment as signed. Returns True if found and updated."""
+        now = datetime.now().isoformat()
+        cur = self._conn.execute(
+            """UPDATE form_assignments SET status = 'signed', signed_at = ?
+               WHERE form_id = ? AND role = ? AND assignee_name = ? AND status = 'pending'""",
+            (now, form_id, role, signer_name)
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def all_assignments_signed(self, form_id):
+        """Check if all assignments for a form are signed."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM form_assignments WHERE form_id = ? AND status = 'pending'",
+            (form_id,)
+        ).fetchone()
+        total = self._conn.execute(
+            "SELECT COUNT(*) FROM form_assignments WHERE form_id = ?",
+            (form_id,)
+        ).fetchone()
+        return total[0] > 0 and row[0] == 0
 
     def close(self):
         self._conn.close()

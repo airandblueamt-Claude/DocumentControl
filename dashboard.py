@@ -2646,6 +2646,653 @@ def start_scheduler():
     )
 
 
+# --- Document Templates ---
+
+@app.route('/api/templates')
+def api_templates():
+    tracker = _get_tracker()
+    try:
+        category = request.args.get('category')
+        status = request.args.get('status')
+        search = request.args.get('search')
+        templates = tracker.get_templates(category=category, status=status, search=search)
+        return jsonify(templates=templates)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/stats')
+def api_template_stats():
+    tracker = _get_tracker()
+    try:
+        stats = tracker.get_template_stats()
+        return jsonify(stats)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates', methods=['POST'])
+def api_add_template():
+    if 'file' not in request.files:
+        return jsonify(error='No file uploaded'), 400
+    f = request.files['file']
+    if not f.filename:
+        return jsonify(error='No file selected'), 400
+
+    # Validate file type
+    ext = os.path.splitext(f.filename.lower())[1]
+    allowed = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'}
+    if ext not in allowed:
+        return jsonify(error=f'File type {ext} not allowed. Use PDF, Word, or Excel files.'), 400
+
+    data = f.read()
+    max_size = 25 * 1024 * 1024  # 25MB
+    if len(data) > max_size:
+        return jsonify(error='File too large (max 25MB)'), 400
+
+    name = request.form.get('name', '').strip() or os.path.splitext(f.filename)[0]
+    description = request.form.get('description', '').strip()
+    category = request.form.get('category', 'blank')
+    uploaded_by = request.form.get('uploaded_by', '').strip()
+    tags = request.form.get('tags', '').strip()
+
+    tracker = _get_tracker()
+    try:
+        tid = tracker.add_template(
+            name=name,
+            description=description,
+            category=category,
+            filename=f.filename,
+            content_type=f.content_type or 'application/octet-stream',
+            size=len(data),
+            data=data,
+            uploaded_by=uploaded_by,
+            tags=tags
+        )
+        return jsonify(id=tid, message='Template uploaded successfully')
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>')
+def api_get_template(tid):
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template(tid)
+        if not tmpl:
+            return jsonify(error='Template not found'), 404
+        return jsonify(tmpl)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>', methods=['PUT'])
+def api_update_template(tid):
+    data = request.get_json(force=True)
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template(tid)
+        if not tmpl:
+            return jsonify(error='Template not found'), 404
+        tracker.update_template(tid, **data)
+        return jsonify(message='Updated')
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>', methods=['DELETE'])
+def api_delete_template(tid):
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template(tid)
+        if not tmpl:
+            return jsonify(error='Template not found'), 404
+        tracker.delete_template(tid)
+        return jsonify(message='Deleted')
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>/download')
+def api_download_template(tid):
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template_file(tid)
+        if not tmpl or not tmpl.get('data'):
+            return jsonify(error='Template not found'), 404
+        return Response(
+            tmpl['data'],
+            mimetype=tmpl.get('content_type', 'application/octet-stream'),
+            headers={'Content-Disposition': f'attachment; filename="{tmpl["filename"]}"'}
+        )
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>/preview')
+def api_preview_template(tid):
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template_file(tid)
+        if not tmpl or not tmpl.get('data'):
+            return jsonify(error='Template not found'), 404
+        return Response(
+            tmpl['data'],
+            mimetype=tmpl.get('content_type', 'application/octet-stream'),
+            headers={'Content-Disposition': f'inline; filename="{tmpl["filename"]}"'}
+        )
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>/approve', methods=['POST'])
+def api_approve_template(tid):
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template(tid)
+        if not tmpl:
+            return jsonify(error='Template not found'), 404
+        tracker.update_template(tid, status='active', category='approved')
+        return jsonify(message='Template approved')
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>/reject', methods=['POST'])
+def api_reject_template(tid):
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template(tid)
+        if not tmpl:
+            return jsonify(error='Template not found'), 404
+        tracker.update_template(tid, status='rejected')
+        return jsonify(message='Template rejected')
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>/new-version', methods=['POST'])
+def api_new_version_template(tid):
+    if 'file' not in request.files:
+        return jsonify(error='No file uploaded'), 400
+    f = request.files['file']
+    if not f.filename:
+        return jsonify(error='No file selected'), 400
+
+    ext = os.path.splitext(f.filename.lower())[1]
+    allowed = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'}
+    if ext not in allowed:
+        return jsonify(error=f'File type {ext} not allowed'), 400
+
+    data = f.read()
+    if len(data) > 25 * 1024 * 1024:
+        return jsonify(error='File too large (max 25MB)'), 400
+
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template(tid)
+        if not tmpl:
+            return jsonify(error='Template not found'), 404
+        tracker.update_template_file(tid, f.filename, f.content_type or 'application/octet-stream', len(data), data)
+        return jsonify(message='New version uploaded')
+    finally:
+        tracker.close()
+
+
+# --- Form Submissions ---
+
+@app.route('/api/forms')
+def api_list_forms():
+    tracker = _get_tracker()
+    try:
+        status = request.args.get('status')
+        search = request.args.get('search')
+        assignee = request.args.get('assignee')
+        forms = tracker.get_form_submissions(status=status, search=search, assignee=assignee)
+        return jsonify(forms=forms)
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/stats')
+def api_form_stats():
+    tracker = _get_tracker()
+    try:
+        return jsonify(tracker.get_form_stats())
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/next-number')
+def api_next_form_number():
+    tracker = _get_tracker()
+    try:
+        return jsonify(form_number=tracker.next_form_number())
+    finally:
+        tracker.close()
+
+@app.route('/api/forms', methods=['POST'])
+def api_create_form():
+    data = request.get_json(force=True)
+    tracker = _get_tracker()
+    try:
+        form_number = tracker.next_form_number()
+        fid = tracker.create_form_submission(
+            form_type=data.get('form_type', 'requisition'),
+            form_number=form_number,
+            title=data.get('title', ''),
+            form_data=json.dumps(data.get('form_data', {})),
+            created_by=data.get('created_by', ''),
+            template_id=data.get('template_id')
+        )
+        return jsonify(id=fid, form_number=form_number)
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>')
+def api_get_form(fid):
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        return jsonify(form)
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>', methods=['PUT'])
+def api_update_form(fid):
+    data = request.get_json(force=True)
+    tracker = _get_tracker()
+    try:
+        fields = {}
+        if 'title' in data:
+            fields['title'] = data['title']
+        if 'form_data' in data:
+            fields['form_data'] = json.dumps(data['form_data']) if isinstance(data['form_data'], dict) else data['form_data']
+        if 'updated_by' in data:
+            fields['updated_by'] = data['updated_by']
+        tracker.update_form_submission(fid, **fields)
+        return jsonify(message='Updated')
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>', methods=['DELETE'])
+def api_delete_form(fid):
+    tracker = _get_tracker()
+    try:
+        tracker.delete_form_submission(fid)
+        return jsonify(message='Deleted')
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>/submit', methods=['POST'])
+def api_submit_form(fid):
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        tracker.update_form_submission(fid, status='submitted')
+        return jsonify(message='Form submitted')
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>/approve', methods=['POST'])
+def api_approve_form(fid):
+    data = request.get_json(force=True) if request.is_json else {}
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        tracker.update_form_submission(
+            fid, status='approved',
+            approved_by=data.get('approved_by', ''),
+            approved_at=datetime.now().isoformat()
+        )
+        return jsonify(message='Form approved')
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>/reject', methods=['POST'])
+def api_reject_form(fid):
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        tracker.update_form_submission(fid, status='rejected')
+        return jsonify(message='Form rejected')
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>/share', methods=['POST'])
+def api_share_form(fid):
+    import uuid
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        token = form.get('share_token')
+        if not token:
+            token = uuid.uuid4().hex[:12]
+            tracker.set_form_share_token(fid, token)
+        return jsonify(token=token)
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/shared/<token>')
+def api_get_shared_form(token):
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_by_token(token)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        return jsonify(form)
+    finally:
+        tracker.close()
+
+@app.route('/api/forms/<int:fid>/pdf')
+def api_form_pdf(fid):
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        pdf_bytes = _generate_requisition_pdf(form)
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={'Content-Disposition': f'inline; filename="{form["form_number"]}.pdf"'}
+        )
+    finally:
+        tracker.close()
+
+
+def _draw_amt_logo(canvas_or_drawing, x, y, scale=1.0):
+    """Draw the AMT company logo at position (x, y).
+    Uses ReportLab drawing primitives to recreate the red triangle/arrow AMT logo.
+    """
+    from reportlab.lib import colors as c
+    from reportlab.graphics.shapes import Drawing, Group, Polygon, String, Line
+    from reportlab.graphics import renderPDF
+
+    brand_red = c.HexColor('#c62828')
+    dark_red = c.HexColor('#8e0000')
+
+    d = Drawing(180 * scale, 70 * scale)
+
+    # --- AMT triangle/arrow icon ---
+    # Outer red triangle (pointing up)
+    tri_x = 20 * scale
+    tri_y = 8 * scale
+    tri_w = 55 * scale
+    tri_h = 50 * scale
+    d.add(Polygon(
+        points=[tri_x + tri_w / 2, tri_y + tri_h,
+                tri_x, tri_y,
+                tri_x + tri_w, tri_y],
+        fillColor=brand_red, strokeColor=None
+    ))
+    # White inner triangle cutout (smaller, shifted down)
+    cut_s = 18 * scale
+    cut_y = 14 * scale
+    cx = tri_x + tri_w / 2
+    d.add(Polygon(
+        points=[cx, cut_y + cut_s * 1.3,
+                cx - cut_s * 0.6, cut_y,
+                cx + cut_s * 0.6, cut_y],
+        fillColor=c.white, strokeColor=None
+    ))
+
+    # --- "AMT" text ---
+    d.add(String(80 * scale, 30 * scale, 'AMT',
+                 fontSize=32 * scale, fontName='Helvetica-Bold', fillColor=brand_red))
+
+    # --- Arabic company name ---
+    # ReportLab has limited Arabic support, so we use the English transliteration
+    d.add(String(80 * scale, 16 * scale, '\u0634\u0631\u0643\u0629 \u0627\u0644\u0623\u0628\u0639\u0627\u062f \u0627\u0644\u0645\u062a\u0631\u0627\u0645\u064a\u0629 \u0644\u0644\u062a\u0642\u0646\u064a\u0629',
+                 fontSize=7 * scale, fontName='Helvetica', fillColor=c.HexColor('#666666')))
+
+    # --- English company name ---
+    d.add(String(80 * scale, 6 * scale, 'Advanced Micro Technologies Co.',
+                 fontSize=7.5 * scale, fontName='Helvetica', fillColor=c.HexColor('#666666')))
+
+    # --- Red underline ---
+    d.add(Line(0, 2 * scale, 180 * scale, 2 * scale,
+               strokeColor=brand_red, strokeWidth=1.5 * scale))
+
+    return d
+
+
+def _generate_requisition_pdf(form):
+    """Generate PDF for Internal Requisition (AMT Form No. 004)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm,
+                            topMargin=15*mm, bottomMargin=15*mm)
+    styles = getSampleStyleSheet()
+    data = json.loads(form['form_data']) if isinstance(form['form_data'], str) else form['form_data']
+    elements = []
+
+    brand_color = colors.HexColor('#b71c1c')
+    header_bg = colors.HexColor('#d32f2f')
+
+    # Company logo
+    logo = _draw_amt_logo(None, 0, 0, scale=1.0)
+    elements.append(logo)
+    elements.append(Spacer(1, 4*mm))
+
+    # Title
+    title_style = ParagraphStyle('FormTitle', parent=styles['Title'], fontSize=16,
+                                  textColor=brand_color, alignment=TA_CENTER, spaceAfter=2*mm)
+    subtitle_style = ParagraphStyle('FormSub', parent=styles['Normal'], fontSize=9,
+                                     textColor=colors.grey, alignment=TA_CENTER, spaceAfter=6*mm)
+    elements.append(Paragraph('Internal Requisition', title_style))
+    elements.append(Paragraph(f'{form["form_number"]}  |  AMT Form No. 004 (Mar. 2026) V1', subtitle_style))
+
+    # Header fields
+    label_style = ParagraphStyle('Label', parent=styles['Normal'], fontSize=9, textColor=colors.grey)
+    val_style = ParagraphStyle('Val', parent=styles['Normal'], fontSize=10)
+    header_data = [
+        [Paragraph('Requested By:', label_style), Paragraph(data.get('requested_by', ''), val_style),
+         Paragraph('Date:', label_style), Paragraph(data.get('date', ''), val_style)],
+        [Paragraph('Department:', label_style), Paragraph(data.get('department', ''), val_style),
+         Paragraph('Project No:', label_style), Paragraph(data.get('project_no', ''), val_style)],
+    ]
+    ht = Table(header_data, colWidths=[70, 170, 70, 170])
+    ht.setStyle(TableStyle([
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('LINEBELOW', (1, 0), (1, -1), 0.5, colors.lightgrey),
+        ('LINEBELOW', (3, 0), (3, -1), 0.5, colors.lightgrey),
+        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+    ]))
+    elements.append(ht)
+    elements.append(Spacer(1, 6*mm))
+
+    # Line items table
+    line_items = data.get('line_items', [])
+    th_style = ParagraphStyle('TH', parent=styles['Normal'], fontSize=9, textColor=colors.white,
+                               fontName='Helvetica-Bold')
+    td_style = ParagraphStyle('TD', parent=styles['Normal'], fontSize=9)
+    td_right = ParagraphStyle('TDR', parent=td_style, alignment=TA_RIGHT)
+
+    table_data = [[Paragraph('Item', th_style), Paragraph('Description', th_style),
+                    Paragraph('Qty', th_style), Paragraph('Unit Rate', th_style),
+                    Paragraph('Amount (SAR)', th_style)]]
+    grand_total = 0
+    for item in line_items:
+        desc = item.get('description', '')
+        if not desc:
+            continue
+        qty = item.get('qty', 0) or 0
+        rate = item.get('unit_rate', 0) or 0
+        amt = qty * rate
+        grand_total += amt
+        table_data.append([
+            Paragraph(str(item.get('item_no', '')), td_style),
+            Paragraph(desc, td_style),
+            Paragraph(str(qty), td_right),
+            Paragraph(f'{rate:,.2f}', td_right),
+            Paragraph(f'{amt:,.2f}', td_right),
+        ])
+
+    # Grand total row
+    total_style = ParagraphStyle('Total', parent=td_right, fontName='Helvetica-Bold', fontSize=10)
+    table_data.append([
+        '', '', '', Paragraph('Grand Total', total_style),
+        Paragraph(f'{grand_total:,.2f}', total_style),
+    ])
+
+    lt = Table(table_data, colWidths=[40, 210, 55, 80, 95])
+    lt_style = [
+        ('BACKGROUND', (0, 0), (-1, 0), header_bg),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -2), 0.5, colors.Color(0.85, 0.85, 0.85)),
+        ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fff3f3')),
+        ('LINEABOVE', (0, -1), (-1, -1), 1, header_bg),
+    ]
+    # Alternate row shading
+    for i in range(1, len(table_data) - 1):
+        if i % 2 == 0:
+            lt_style.append(('BACKGROUND', (0, i), (-1, i), colors.HexColor('#fafafa')))
+    lt.setStyle(TableStyle(lt_style))
+    elements.append(lt)
+    elements.append(Spacer(1, 12*mm))
+
+    # Signature section
+    sig_label = ParagraphStyle('SigLabel', parent=styles['Normal'], fontSize=8,
+                                textColor=colors.grey, alignment=TA_CENTER)
+    sig_val = ParagraphStyle('SigVal', parent=styles['Normal'], fontSize=10, alignment=TA_CENTER)
+    sig_data = [
+        [Paragraph('Signature of Requestor', sig_label),
+         Paragraph('Recommending Approval', sig_label),
+         Paragraph('Approved By', sig_label)],
+        [Paragraph(data.get('sig_requestor', ''), sig_val),
+         Paragraph(data.get('sig_pm', ''), sig_val),
+         Paragraph(data.get('sig_ceo', ''), sig_val)],
+        [Paragraph('___________________', sig_val),
+         Paragraph('___________________', sig_val),
+         Paragraph('___________________', sig_val)],
+        [Paragraph('', sig_label),
+         Paragraph('Project Manager', sig_label),
+         Paragraph('CEO', sig_label)],
+    ]
+    st = Table(sig_data, colWidths=[160, 160, 160])
+    st.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+    ]))
+    elements.append(st)
+
+    # Draft watermark
+    if form.get('status') == 'draft':
+        def add_watermark(canvas, doc):
+            canvas.saveState()
+            canvas.setFont('Helvetica-Bold', 60)
+            canvas.setFillColor(colors.Color(0.9, 0.9, 0.9, alpha=0.5))
+            canvas.translate(A4[0] / 2, A4[1] / 2)
+            canvas.rotate(45)
+            canvas.drawCentredString(0, 0, 'DRAFT')
+            canvas.restoreState()
+        doc.build(elements, onFirstPage=add_watermark, onLaterPages=add_watermark)
+    else:
+        doc.build(elements)
+
+    return buf.getvalue()
+
+
+# --- Form Assignments ---
+
+@app.route('/api/forms/<int:fid>/assignments')
+def api_form_assignments(fid):
+    tracker = _get_tracker()
+    try:
+        assignments = tracker.get_form_assignments(fid)
+        return jsonify(assignments=assignments)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/forms/<int:fid>/assign', methods=['POST'])
+def api_assign_form(fid):
+    data = request.get_json(force=True)
+    assignments = data.get('assignments', [])
+    if not assignments:
+        return jsonify(error='No assignments provided'), 400
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        tracker.set_form_assignments(fid, assignments)
+        return jsonify(message='Assignments saved')
+    finally:
+        tracker.close()
+
+
+@app.route('/api/forms/<int:fid>/sign', methods=['POST'])
+def api_sign_form(fid):
+    data = request.get_json(force=True)
+    role = data.get('role', '')
+    signer_name = data.get('signer_name', '')
+    if not role or not signer_name:
+        return jsonify(error='Role and signer_name required'), 400
+    tracker = _get_tracker()
+    try:
+        form = tracker.get_form_submission(fid)
+        if not form:
+            return jsonify(error='Form not found'), 404
+        signed = tracker.sign_form_assignment(fid, role, signer_name)
+        if not signed:
+            return jsonify(error='Assignment not found or already signed'), 404
+        # Update the signature field in form_data
+        fd = json.loads(form['form_data']) if isinstance(form['form_data'], str) else form['form_data']
+        sig_field_map = {'requestor': 'sig_requestor', 'project_manager': 'sig_pm', 'ceo': 'sig_ceo'}
+        sig_field = sig_field_map.get(role)
+        if sig_field:
+            fd[sig_field] = signer_name
+            tracker.update_form_submission(fid, form_data=json.dumps(fd))
+        # Auto-approve if all signed
+        if tracker.all_assignments_signed(fid):
+            tracker.update_form_submission(fid, status='approved',
+                                           approved_by='All signers', approved_at=datetime.now().isoformat())
+            return jsonify(message='Signed — form fully approved', auto_approved=True)
+        return jsonify(message='Signed successfully', auto_approved=False)
+    finally:
+        tracker.close()
+
+
+@app.route('/api/templates/<int:tid>/fill')
+def api_fill_template(tid):
+    """Return template info so the frontend can open the form editor linked to this template."""
+    tracker = _get_tracker()
+    try:
+        tmpl = tracker.get_template(tid)
+        if not tmpl:
+            return jsonify(error='Template not found'), 404
+        # Detect form type from template name/tags
+        name_lower = (tmpl.get('name', '') + ' ' + tmpl.get('tags', '')).lower()
+        form_type = 'requisition' if any(kw in name_lower for kw in ['requisition', 'request form', 'internal request']) else None
+        if not form_type:
+            return jsonify(error='This template does not have a fillable form type configured'), 400
+        return jsonify(template_id=tid, form_type=form_type, template_name=tmpl['name'])
+    finally:
+        tracker.close()
+
+
 # --- Main ---
 
 if __name__ == '__main__':

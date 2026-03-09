@@ -1047,6 +1047,7 @@
         <button class="tab-btn" data-tab="departments" onclick="switchTab('departments')">Depts</button>
         <button class="tab-btn" data-tab="contacts" onclick="switchTab('contacts')">Contacts</button>
         <button class="tab-btn" data-tab="projects" onclick="switchTab('projects')">Projects</button>
+        <button class="tab-btn" data-tab="templates" onclick="switchTab('templates')">Templates</button>
     </div>
 
     <div class="toast-container" id="toastContainer"></div>
@@ -1640,6 +1641,259 @@
         </div>
     </div>
 
+    <!-- TEMPLATES -->
+    <div class="tab-panel" id="tab-templates">
+        <div class="container">
+            <!-- Sub-tab toggle -->
+            <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
+                <button class="btn btn-ghost" id="subTabTemplates" onclick="switchSubTab('templates')" style="border-bottom:2px solid var(--primary);font-weight:600;border-radius:0;padding:8px 20px;font-size:14px">File Templates</button>
+                <button class="btn btn-ghost" id="subTabForms" onclick="switchSubTab('forms')" style="border-bottom:2px solid transparent;border-radius:0;padding:8px 20px;font-size:14px">Filled Forms</button>
+            </div>
+
+            <!-- FILE TEMPLATES VIEW (existing) -->
+            <div id="templateFileView">
+            <div class="kpi-row" id="templateKpiRow">
+                <div class="kpi-card border-primary"><div class="kpi-value" id="tmplKpiTotal">--</div><div class="kpi-label">Total Templates</div></div>
+                <div class="kpi-card border-success"><div class="kpi-value text-success" id="tmplKpiBlank">--</div><div class="kpi-label">Blank</div></div>
+                <div class="kpi-card border-purple"><div class="kpi-value" id="tmplKpiApproved">--</div><div class="kpi-label">Approved</div></div>
+                <div class="kpi-card border-warn"><div class="kpi-value" id="tmplKpiPending">--</div><div class="kpi-label">Pending Approval</div></div>
+            </div>
+
+            <div class="table-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-top">
+                        <h2>Document Templates</h2>
+                        <div class="toolbar-controls">
+                            <button class="btn btn-primary btn-sm" onclick="showUploadTemplateForm()">Upload Template</button>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+                        <input class="search-box" id="templateSearch" type="text" placeholder="Search templates..." oninput="filterTemplates()" style="flex:2;min-width:160px">
+                        <select class="inline-select" id="templateCategoryFilter" onchange="filterTemplates()" style="flex:0 0 140px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+                            <option value="">All Categories</option>
+                            <option value="blank">Blank</option>
+                            <option value="signed">Signed</option>
+                            <option value="approved">Approved</option>
+                            <option value="pending_approval">Pending Approval</option>
+                        </select>
+                        <select class="inline-select" id="templateTypeFilter" onchange="filterTemplates()" style="flex:0 0 120px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+                            <option value="">All Types</option>
+                            <option value="pdf">PDF</option>
+                            <option value="xlsx">Excel</option>
+                            <option value="docx">Word</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Upload Form (hidden by default) -->
+                <div id="uploadTemplateForm" style="display:none;padding:16px;border-bottom:1px solid var(--border);background:var(--bg)">
+                    <div style="font-weight:600;margin-bottom:10px">Upload New Template</div>
+                    <div id="tmplDropZone" style="border:2px dashed var(--border);border-radius:8px;padding:32px;text-align:center;cursor:pointer;margin-bottom:12px;transition:all 0.2s">
+                        <div style="font-size:28px;margin-bottom:8px;opacity:0.5">&#128196;</div>
+                        <div style="font-weight:500;margin-bottom:4px">Drag &amp; drop file here or click to browse</div>
+                        <div style="font-size:12px;color:var(--text-muted)">PDF, Word, Excel (max 25MB)</div>
+                        <input type="file" id="tmplFileInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none">
+                        <div id="tmplFileName" style="margin-top:8px;font-size:13px;color:var(--primary);font-weight:500"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Template Name</label><input type="text" id="tmplName" placeholder="e.g. Internal Request Form"></div>
+                        <div class="form-group" style="flex:1"><label>Category</label>
+                            <select id="tmplCategory" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+                                <option value="blank">Blank Form</option>
+                                <option value="signed">Signed / Completed</option>
+                                <option value="pending_approval">Needs Approval</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Description</label><input type="text" id="tmplDescription" placeholder="Brief description of this template"></div>
+                        <div class="form-group" style="flex:1"><label>Uploaded By</label><input type="text" id="tmplUploadedBy" placeholder="Your name"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:1"><label>Tags (comma-separated)</label><input type="text" id="tmplTags" placeholder="e.g. finance, requisition, form"></div>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+                        <button class="btn btn-ghost btn-sm" onclick="hideUploadTemplateForm()">Cancel</button>
+                        <button class="btn btn-primary btn-sm" id="btnUploadTemplate" onclick="uploadTemplate()">Upload</button>
+                    </div>
+                </div>
+
+                <div id="templateTableWrap">
+                    <div class="empty-state">No templates uploaded yet. Click "Upload Template" to add your first document template.</div>
+                </div>
+            </div>
+
+            <!-- Template Detail / Edit Modal -->
+            <div class="modal-overlay" id="templateDetailModal" onclick="if(event.target===this)closeTemplateDetail()" style="display:none">
+                <div class="modal" style="max-width:520px">
+                    <div class="modal-header">
+                        <h2 id="tmplDetailTitle">Template Details</h2>
+                        <button class="modal-close" onclick="closeTemplateDetail()">&times;</button>
+                    </div>
+                    <div style="padding:20px">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:2"><label>Name</label><input type="text" id="tmplEditName"></div>
+                            <div class="form-group" style="flex:1"><label>Category</label>
+                                <select id="tmplEditCategory" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text)">
+                                    <option value="blank">Blank Form</option>
+                                    <option value="signed">Signed / Completed</option>
+                                    <option value="approved">Approved</option>
+                                    <option value="pending_approval">Needs Approval</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group"><label>Description</label><input type="text" id="tmplEditDescription" style="width:100%"></div>
+                        <div class="form-group"><label>Tags</label><input type="text" id="tmplEditTags" style="width:100%"></div>
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0;font-size:13px;color:var(--text-muted)">
+                            <span id="tmplDetailMeta"></span>
+                        </div>
+                        <div style="margin:12px 0">
+                            <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Upload New Version</label>
+                            <input type="file" id="tmplNewVersionFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="font-size:13px">
+                        </div>
+                        <div style="display:flex;gap:8px;justify-content:space-between;margin-top:16px">
+                            <div>
+                                <button class="btn btn-danger btn-sm" onclick="deleteTemplate(currentTemplateId)">Delete</button>
+                            </div>
+                            <div style="display:flex;gap:8px">
+                                <button class="btn btn-ghost btn-sm" onclick="closeTemplateDetail()">Cancel</button>
+                                <button class="btn btn-primary btn-sm" onclick="saveTemplateEdits()">Save Changes</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div><!-- /templateFileView -->
+
+            <!-- FILLED FORMS VIEW -->
+            <div id="formListView" style="display:none">
+                <div class="kpi-row" id="formKpiRow">
+                    <div class="kpi-card border-primary"><div class="kpi-value" id="formKpiTotal">--</div><div class="kpi-label">Total Forms</div></div>
+                    <div class="kpi-card border-primary"><div class="kpi-value" id="formKpiDraft" style="color:var(--primary)">--</div><div class="kpi-label">Drafts</div></div>
+                    <div class="kpi-card border-warn"><div class="kpi-value" style="color:var(--warn)" id="formKpiSubmitted">--</div><div class="kpi-label">Submitted</div></div>
+                    <div class="kpi-card border-success"><div class="kpi-value text-success" id="formKpiApproved">--</div><div class="kpi-label">Approved</div></div>
+                </div>
+
+                <div class="table-card">
+                    <div class="table-toolbar">
+                        <div class="toolbar-top">
+                            <h2>Filled Forms</h2>
+                            <div class="toolbar-controls">
+                                <button class="btn btn-primary btn-sm" onclick="openFormEditor(null)">New Requisition</button>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+                            <input class="search-box" id="formSearch" type="text" placeholder="Search forms..." oninput="filterForms()" style="flex:2;min-width:160px">
+                            <select class="inline-select" id="formStatusFilter" onchange="if(this.value==='assigned_to_me'){fetchForms();}else{fetchForms();}" style="flex:0 0 160px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+                                <option value="">All Status</option>
+                                <option value="draft">Draft</option>
+                                <option value="submitted">Submitted</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="assigned_to_me">Assigned to Me</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="formTableWrap">
+                        <div class="empty-state">No forms yet. Click "New Requisition" to create your first form.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Editor Modal -->
+            <div class="modal-overlay" id="formEditorModal" onclick="if(event.target===this)closeFormEditor()" style="display:none">
+                <div class="modal" style="max-width:900px;min-height:auto;margin:40px auto">
+                    <div class="modal-header" style="background:#fff;color:#333;border-bottom:3px solid #c62828;padding:16px 24px">
+                        <div style="display:flex;align-items:center;gap:16px">
+                            <svg width="120" height="55" viewBox="0 0 120 55" xmlns="http://www.w3.org/2000/svg">
+                                <polygon points="28,4 4,48 52,48" fill="#c62828"/>
+                                <polygon points="28,18 18,40 38,40" fill="#fff"/>
+                                <text x="58" y="36" font-family="Arial,Helvetica,sans-serif" font-weight="bold" font-size="28" fill="#c62828">AMT</text>
+                                <text x="58" y="46" font-family="Arial,Helvetica,sans-serif" font-size="5.5" fill="#999">&#1588;&#1585;&#1603;&#1577; &#1575;&#1604;&#1571;&#1576;&#1593;&#1575;&#1583; &#1575;&#1604;&#1605;&#1578;&#1585;&#1575;&#1605;&#1610;&#1577; &#1604;&#1604;&#1578;&#1602;&#1606;&#1610;&#1577;</text>
+                                <text x="58" y="52" font-family="Arial,Helvetica,sans-serif" font-size="6" fill="#888">Advanced Micro Technologies Co.</text>
+                                <line x1="0" y1="54" x2="120" y2="54" stroke="#c62828" stroke-width="1.5"/>
+                            </svg>
+                            <div>
+                                <div style="font-size:16px;font-weight:700;color:#c62828;letter-spacing:0.5px">Internal Requisition</div>
+                                <div style="font-size:12px;color:#888" id="formEditorNumber">AMT Form No. 004</div>
+                            </div>
+                        </div>
+                        <button class="modal-close" onclick="closeFormEditor()" style="color:#333">&times;</button>
+                    </div>
+                    <div style="padding:20px">
+                        <!-- Status badge -->
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                            <div class="form-group" style="margin:0;flex:1"><label>Form Title</label><input type="text" id="formTitle" placeholder="e.g. Office Supplies Q1" style="width:100%"></div>
+                            <span id="formEditorStatus" style="margin-left:12px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600"></span>
+                        </div>
+                        <!-- Header fields -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+                            <div class="form-group"><label>Requested By</label><input type="text" id="formRequestedBy"></div>
+                            <div class="form-group"><label>Date</label><input type="date" id="formDate"></div>
+                            <div class="form-group"><label>Department</label><input type="text" id="formDepartment"></div>
+                            <div class="form-group"><label>Project No</label><input type="text" id="formProjectNo"></div>
+                        </div>
+
+                        <!-- Line items table -->
+                        <div style="overflow-x:auto">
+                        <table class="email-table" style="width:100%;border-collapse:collapse">
+                            <thead>
+                                <tr>
+                                    <th style="width:45px;text-align:center">#</th>
+                                    <th style="min-width:200px">Description</th>
+                                    <th style="width:75px;text-align:right">Qty</th>
+                                    <th style="width:100px;text-align:right">Unit Rate</th>
+                                    <th style="width:120px;text-align:right">Amount (SAR)</th>
+                                    <th style="width:35px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="formLineItemsBody"></tbody>
+                            <tfoot>
+                                <tr style="font-weight:700;background:var(--bg)">
+                                    <td colspan="4" style="text-align:right;padding:10px 8px;font-size:14px">Grand Total (SAR)</td>
+                                    <td id="formGrandTotal" style="text-align:right;padding:10px 8px;font-size:16px;color:var(--primary)">0.00</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" onclick="addFormLineItem()" style="margin-top:8px" id="btnAddRow">+ Add Row</button>
+
+                        <!-- Signature section -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
+                            <div class="form-group"><label>Signature of Requestor</label><input type="text" id="formSigRequestor"></div>
+                            <div class="form-group"><label>Recommending Approval (PM)</label><input type="text" id="formSigPM"></div>
+                            <div class="form-group"><label>Approved By (CEO)</label><input type="text" id="formSigCEO"></div>
+                        </div>
+
+                        <!-- Assignment Panel -->
+                        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)" id="assignmentSection">
+                            <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:8px" onclick="toggleAssignPanel()">
+                                <div style="font-weight:600;font-size:14px">Assign Signers</div>
+                                <span id="assignToggleIcon" style="font-size:18px;color:var(--text-muted)">&#9660;</span>
+                            </div>
+                            <div id="assignmentPanel" style="display:none"></div>
+                        </div>
+
+                        <!-- Action buttons -->
+                        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap">
+                            <button class="btn btn-ghost btn-sm" onclick="closeFormEditor()">Cancel</button>
+                            <button class="btn btn-ghost btn-sm" id="btnShareForm" onclick="shareForm(currentFormId)" style="display:none">Share Link</button>
+                            <button class="btn btn-ghost btn-sm" id="btnDeleteForm" onclick="deleteForm(currentFormId)" style="display:none;color:var(--danger)">Delete</button>
+                            <button class="btn btn-primary btn-sm" id="btnSaveDraft" onclick="saveFormDraft()">Save Draft</button>
+                            <button class="btn btn-sm" id="btnSubmitForm" onclick="submitForm()" style="background:var(--warn);color:#fff">Submit</button>
+                            <button class="btn btn-success btn-sm" id="btnApproveForm" onclick="approveForm()" style="display:none">Approve</button>
+                            <button class="btn btn-danger btn-sm" id="btnRejectForm" onclick="rejectForm()" style="display:none">Reject</button>
+                            <button class="btn btn-sm" id="btnExportPDF" onclick="downloadFormPDF()" style="background:var(--purple);color:#fff">Export PDF</button>
+                            <button class="btn btn-sm" id="btnSignForm" onclick="signCurrentForm()" style="display:none;background:#0d6efd;color:#fff">Sign</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
 <script>
 // ---- State ----
 var classificationOptions = { doc_types: [], disciplines: [], departments: [], team_members: [] };
@@ -1832,6 +2086,7 @@ function switchTab(tab) {
     if(tab==='departments') fetchDepartments();
     if(tab==='contacts'){fetchContacts();fetchSuggestedContacts();}
     if(tab==='projects') fetchProjects();
+    if(tab==='templates') fetchTemplates();
 }
 
 // ---- Scanner ----
@@ -3636,8 +3891,758 @@ function updateProjectNotes(id){
     }).catch(function(){showToast('Failed','error');});
 }
 
+// ---- Templates ----
+var allTemplates = [];
+var currentTemplateId = null;
+
+function fetchTemplates() {
+    fetch('/api/templates').then(function(r){return r.json();}).then(function(d){
+        allTemplates = d.templates || [];
+        filterTemplates();
+    }).catch(function(){showToast('Failed to load templates','error');});
+
+    fetch('/api/templates/stats').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('tmplKpiTotal').textContent = d.total || 0;
+        document.getElementById('tmplKpiBlank').textContent = d.blank || 0;
+        document.getElementById('tmplKpiApproved').textContent = d.approved || 0;
+        document.getElementById('tmplKpiPending').textContent = d.pending_approval || 0;
+    });
+}
+
+function filterTemplates() {
+    var search = (document.getElementById('templateSearch').value || '').toLowerCase();
+    var cat = document.getElementById('templateCategoryFilter').value;
+    var type = document.getElementById('templateTypeFilter').value;
+    var filtered = allTemplates.filter(function(t) {
+        if (search && t.name.toLowerCase().indexOf(search) === -1 &&
+            (t.description || '').toLowerCase().indexOf(search) === -1 &&
+            (t.tags || '').toLowerCase().indexOf(search) === -1) return false;
+        if (cat && t.category !== cat) return false;
+        if (type && t.file_type !== type) return false;
+        return true;
+    });
+    renderTemplateTable(filtered);
+}
+
+function renderTemplateTable(templates) {
+    var wrap = document.getElementById('templateTableWrap');
+    if (!templates.length) {
+        wrap.innerHTML = '<div class="empty-state">No templates found.</div>';
+        return;
+    }
+    var categoryLabels = {blank:'Blank',signed:'Signed',approved:'Approved',pending_approval:'Pending Approval'};
+    var categoryColors = {blank:'var(--primary)',signed:'var(--success)',approved:'var(--purple)',pending_approval:'var(--warn)'};
+    var fileIcons = {pdf:'&#128196;',xlsx:'&#128202;',xls:'&#128202;',docx:'&#128221;',doc:'&#128221;',pptx:'&#128218;',ppt:'&#128218;'};
+    var html = '<table class="email-table"><thead><tr>' +
+        '<th style="width:36px"></th>' +
+        '<th>Name</th>' +
+        '<th>Category</th>' +
+        '<th>Type</th>' +
+        '<th>Size</th>' +
+        '<th>Version</th>' +
+        '<th>Uploaded By</th>' +
+        '<th>Updated</th>' +
+        '<th style="width:140px">Actions</th>' +
+        '</tr></thead><tbody>';
+    templates.forEach(function(t) {
+        var icon = fileIcons[t.file_type] || '&#128196;';
+        var catLabel = categoryLabels[t.category] || t.category;
+        var catColor = categoryColors[t.category] || 'var(--text-muted)';
+        var size = t.size ? (t.size < 1024*1024 ? (t.size/1024).toFixed(0) + ' KB' : (t.size/1024/1024).toFixed(1) + ' MB') : '--';
+        var updated = t.updated_at ? new Date(t.updated_at).toLocaleDateString() : '--';
+        var statusBadge = t.status === 'rejected' ? '<span style="color:var(--danger);font-size:11px;margin-left:4px">(Rejected)</span>' : '';
+        html += '<tr style="cursor:pointer" onclick="openTemplateDetail('+t.id+')">' +
+            '<td style="font-size:20px;text-align:center">'+icon+'</td>' +
+            '<td><div style="font-weight:600">'+_esc(t.name)+statusBadge+'</div>' +
+            (t.description ? '<div style="font-size:12px;color:var(--text-muted)">'+_esc(t.description)+'</div>' : '') +
+            (t.tags ? '<div style="margin-top:2px">'+t.tags.split(',').map(function(tg){return '<span class="tag" style="font-size:10px;margin-right:3px">'+_esc(tg.trim())+'</span>';}).join('')+'</div>' : '') +
+            '</td>' +
+            '<td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:'+catColor+';color:#fff">'+catLabel+'</span></td>' +
+            '<td style="text-transform:uppercase;font-size:12px;font-weight:600">'+_esc(t.file_type || '--')+'</td>' +
+            '<td style="font-size:12px">'+size+'</td>' +
+            '<td style="text-align:center">v'+t.version+'</td>' +
+            '<td style="font-size:12px">'+_esc(t.uploaded_by || '--')+'</td>' +
+            '<td style="font-size:12px">'+updated+'</td>' +
+            '<td onclick="event.stopPropagation()">' +
+            '<div style="display:flex;gap:4px">' +
+            '<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 8px" onclick="downloadTemplate('+t.id+')">Download</button>' +
+            (t.file_type === 'pdf' ? '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="previewTemplate('+t.id+')">View</button>' : '') +
+            (t.category === 'pending_approval' && t.status !== 'rejected' ? '<button class="btn btn-success btn-sm" style="font-size:11px;padding:3px 8px" onclick="approveTemplate('+t.id+')">Approve</button>' : '') +
+            (isFillableTemplate(t) ? '<button class="btn btn-sm" style="font-size:11px;padding:3px 8px;background:var(--success);color:#fff" onclick="fillTemplate('+t.id+')">Fill</button>' : '') +
+            '</div></td></tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+}
+
+function _esc(s) { if(!s) return ''; var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function showUploadTemplateForm() {
+    document.getElementById('uploadTemplateForm').style.display = 'block';
+    document.getElementById('tmplName').value = '';
+    document.getElementById('tmplDescription').value = '';
+    document.getElementById('tmplUploadedBy').value = '';
+    document.getElementById('tmplTags').value = '';
+    document.getElementById('tmplCategory').value = 'blank';
+    document.getElementById('tmplFileName').textContent = '';
+    document.getElementById('tmplFileInput').value = '';
+}
+function hideUploadTemplateForm() { document.getElementById('uploadTemplateForm').style.display = 'none'; }
+
+// Drag and drop
+(function(){
+    var dz = document.getElementById('tmplDropZone');
+    var fi = document.getElementById('tmplFileInput');
+    if(!dz || !fi) return;
+    dz.addEventListener('click', function(){ fi.click(); });
+    dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.style.borderColor='var(--primary)'; dz.style.background='rgba(59,130,246,0.05)'; });
+    dz.addEventListener('dragleave', function(){ dz.style.borderColor='var(--border)'; dz.style.background=''; });
+    dz.addEventListener('drop', function(e){
+        e.preventDefault(); dz.style.borderColor='var(--border)'; dz.style.background='';
+        if(e.dataTransfer.files.length){ fi.files = e.dataTransfer.files; tmplFileSelected(); }
+    });
+    fi.addEventListener('change', tmplFileSelected);
+})();
+function tmplFileSelected(){
+    var fi = document.getElementById('tmplFileInput');
+    if(fi.files.length){
+        var name = fi.files[0].name;
+        document.getElementById('tmplFileName').textContent = name;
+        if(!document.getElementById('tmplName').value){
+            document.getElementById('tmplName').value = name.replace(/\.[^.]+$/, '');
+        }
+    }
+}
+
+function uploadTemplate() {
+    var fi = document.getElementById('tmplFileInput');
+    if(!fi.files.length){ showToast('Please select a file','error'); return; }
+    var fd = new FormData();
+    fd.append('file', fi.files[0]);
+    fd.append('name', document.getElementById('tmplName').value);
+    fd.append('description', document.getElementById('tmplDescription').value);
+    fd.append('category', document.getElementById('tmplCategory').value);
+    fd.append('uploaded_by', document.getElementById('tmplUploadedBy').value);
+    fd.append('tags', document.getElementById('tmplTags').value);
+
+    var btn = document.getElementById('btnUploadTemplate');
+    btn.disabled = true; btn.textContent = 'Uploading...';
+    fetch('/api/templates', {method:'POST', body:fd})
+        .then(function(r){return r.json();})
+        .then(function(d){
+            btn.disabled = false; btn.textContent = 'Upload';
+            if(d.error){showToast(d.error,'error');return;}
+            showToast('Template uploaded!','success');
+            hideUploadTemplateForm();
+            fetchTemplates();
+        }).catch(function(){btn.disabled=false;btn.textContent='Upload';showToast('Upload failed','error');});
+}
+
+function downloadTemplate(id){ window.open('/api/templates/'+id+'/download','_blank'); }
+function previewTemplate(id){ window.open('/api/templates/'+id+'/preview','_blank'); }
+
+function approveTemplate(id){
+    fetch('/api/templates/'+id+'/approve',{method:'POST'})
+        .then(function(r){return r.json();}).then(function(d){
+            if(d.error){showToast(d.error,'error');return;}
+            showToast('Template approved','success');
+            fetchTemplates();
+        }).catch(function(){showToast('Failed','error');});
+}
+
+function openTemplateDetail(id){
+    currentTemplateId = id;
+    var t = allTemplates.find(function(x){return x.id===id;});
+    if(!t) return;
+    document.getElementById('tmplEditName').value = t.name || '';
+    document.getElementById('tmplEditDescription').value = t.description || '';
+    document.getElementById('tmplEditCategory').value = t.category || 'blank';
+    document.getElementById('tmplEditTags').value = t.tags || '';
+    document.getElementById('tmplNewVersionFile').value = '';
+    var size = t.size ? (t.size < 1024*1024 ? (t.size/1024).toFixed(0) + ' KB' : (t.size/1024/1024).toFixed(1) + ' MB') : '--';
+    document.getElementById('tmplDetailMeta').innerHTML =
+        '<b>File:</b> '+_esc(t.filename)+' &middot; '+size+' &middot; v'+t.version+
+        ' &middot; <b>Uploaded by:</b> '+_esc(t.uploaded_by || '--')+
+        ' &middot; <b>Created:</b> '+(t.created_at ? new Date(t.created_at).toLocaleDateString() : '--');
+    document.getElementById('templateDetailModal').style.display = 'flex';
+}
+
+function closeTemplateDetail(){
+    document.getElementById('templateDetailModal').style.display = 'none';
+    currentTemplateId = null;
+}
+
+function saveTemplateEdits(){
+    if(!currentTemplateId) return;
+    var newVersionFile = document.getElementById('tmplNewVersionFile').files;
+
+    // Save metadata first
+    var payload = {
+        name: document.getElementById('tmplEditName').value,
+        description: document.getElementById('tmplEditDescription').value,
+        category: document.getElementById('tmplEditCategory').value,
+        tags: document.getElementById('tmplEditTags').value
+    };
+    fetch('/api/templates/'+currentTemplateId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+        .then(function(r){return r.json();}).then(function(d){
+            if(d.error){showToast(d.error,'error');return;}
+            // Upload new version if file selected
+            if(newVersionFile.length){
+                var fd = new FormData();
+                fd.append('file', newVersionFile[0]);
+                return fetch('/api/templates/'+currentTemplateId+'/new-version',{method:'POST',body:fd})
+                    .then(function(r){return r.json();});
+            }
+            return d;
+        }).then(function(d){
+            if(d && d.error){showToast(d.error,'error');return;}
+            showToast('Template updated','success');
+            closeTemplateDetail();
+            fetchTemplates();
+        }).catch(function(){showToast('Save failed','error');});
+}
+
+function deleteTemplate(id){
+    if(!confirm('Delete this template?')) return;
+    fetch('/api/templates/'+id,{method:'DELETE'})
+        .then(function(r){return r.json();}).then(function(d){
+            if(d.error){showToast(d.error,'error');return;}
+            showToast('Template deleted','success');
+            closeTemplateDetail();
+            fetchTemplates();
+        }).catch(function(){showToast('Failed','error');});
+}
+
+// ---- Template Fill Helpers ----
+function isFillableTemplate(t) {
+    var nameAndTags = ((t.name || '') + ' ' + (t.tags || '') + ' ' + (t.description || '')).toLowerCase();
+    return nameAndTags.indexOf('requisition') >= 0 || nameAndTags.indexOf('request form') >= 0 || nameAndTags.indexOf('internal request') >= 0;
+}
+
+function fillTemplate(templateId) {
+    fetch('/api/templates/' + templateId + '/fill').then(function(r){return r.json();}).then(function(d){
+        if (d.error) { showToast(d.error, 'error'); return; }
+        // Switch to Filled Forms sub-tab and open a new form linked to this template
+        switchSubTab('forms');
+        openFormEditor(null, templateId);
+    }).catch(function(){ showToast('Failed to load template', 'error'); });
+}
+
+// ---- Filled Forms ----
+var allForms = [];
+var currentFormId = null;
+var currentFormTemplateId = null;
+var formLineItemCount = 0;
+var currentSignerName = localStorage.getItem('formSignerName') || '';
+
+function switchSubTab(tab) {
+    var isTemplates = (tab === 'templates');
+    document.getElementById('templateFileView').style.display = isTemplates ? '' : 'none';
+    document.getElementById('formListView').style.display = isTemplates ? 'none' : '';
+    document.getElementById('subTabTemplates').style.borderBottomColor = isTemplates ? 'var(--primary)' : 'transparent';
+    document.getElementById('subTabTemplates').style.fontWeight = isTemplates ? '600' : '400';
+    document.getElementById('subTabForms').style.borderBottomColor = isTemplates ? 'transparent' : 'var(--primary)';
+    document.getElementById('subTabForms').style.fontWeight = isTemplates ? '400' : '600';
+    if (!isTemplates) fetchForms();
+}
+
+function fetchForms() {
+    var url = '/api/forms';
+    var statusFilter = document.getElementById('formStatusFilter').value;
+    if (statusFilter === 'assigned_to_me') {
+        if (!currentSignerName) {
+            currentSignerName = prompt('Enter your name to see forms assigned to you:');
+            if (currentSignerName) localStorage.setItem('formSignerName', currentSignerName);
+            else { document.getElementById('formStatusFilter').value = ''; }
+        }
+        if (currentSignerName) url += '?assignee=' + encodeURIComponent(currentSignerName);
+    }
+    fetch(url).then(function(r){return r.json();}).then(function(d){
+        allForms = d.forms || [];
+        filterForms();
+    });
+    fetch('/api/forms/stats').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('formKpiTotal').textContent = d.total || 0;
+        document.getElementById('formKpiDraft').textContent = d.draft || 0;
+        document.getElementById('formKpiSubmitted').textContent = d.submitted || 0;
+        document.getElementById('formKpiApproved').textContent = d.approved || 0;
+    });
+}
+
+function filterForms() {
+    var search = (document.getElementById('formSearch').value || '').toLowerCase();
+    var status = document.getElementById('formStatusFilter').value;
+    var filtered = allForms.filter(function(f) {
+        if (status && status !== 'assigned_to_me' && f.status !== status) return false;
+        if (search && (f.form_number + ' ' + f.title + ' ' + f.created_by).toLowerCase().indexOf(search) < 0) return false;
+        return true;
+    });
+    renderFormTable(filtered);
+}
+
+function renderFormTable(forms) {
+    var wrap = document.getElementById('formTableWrap');
+    if (!forms.length) { wrap.innerHTML = '<div class="empty-state">No forms found. Click "New Requisition" to create one.</div>'; return; }
+    var statusColors = {draft:'var(--primary)',submitted:'var(--warn)',approved:'var(--success)',rejected:'var(--danger)'};
+    var html = '<table class="email-table"><thead><tr><th>Form No</th><th>Title</th><th>Created By</th><th>Status</th><th>Signers</th><th>Updated</th><th>Actions</th></tr></thead><tbody>';
+    forms.forEach(function(f) {
+        var sc = statusColors[f.status] || 'var(--text-muted)';
+        html += '<tr style="cursor:pointer" onclick="openFormEditor('+f.id+')">';
+        html += '<td style="font-weight:600;font-family:monospace">'+_esc(f.form_number)+'</td>';
+        html += '<td>'+_esc(f.title || 'Untitled')+'</td>';
+        html += '<td>'+_esc(f.created_by || '-')+'</td>';
+        html += '<td><span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:'+sc+';color:#fff;text-transform:capitalize">'+f.status+'</span></td>';
+        // Assignment indicators
+        html += '<td style="font-size:12px">';
+        if (f.assignments && f.assignments.length) {
+            f.assignments.forEach(function(a) {
+                var dotColor = a.status === 'signed' ? 'var(--success)' : 'var(--warn)';
+                var roleLabel = {requestor:'R',project_manager:'PM',ceo:'CEO'}[a.role] || a.role;
+                html += '<span title="'+_esc(a.assignee_name)+' ('+a.role+') - '+a.status+'" style="display:inline-flex;align-items:center;gap:3px;margin-right:6px;font-size:11px">';
+                html += '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block"></span>';
+                html += roleLabel+'</span>';
+            });
+        } else {
+            html += '<span style="color:var(--text-muted)">--</span>';
+        }
+        html += '</td>';
+        html += '<td style="font-size:12px;color:var(--text-muted)">'+_esc((f.updated_at||'').substring(0,10))+'</td>';
+        html += '<td style="white-space:nowrap">';
+        html += '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.open(\'/api/forms/'+f.id+'/pdf\')" title="PDF" style="padding:4px 8px">PDF</button>';
+        html += '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();shareForm('+f.id+')" title="Share" style="padding:4px 8px">Share</button>';
+        html += '</td></tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+}
+
+function openFormEditor(formId, templateId) {
+    currentFormId = formId;
+    currentFormTemplateId = templateId || null;
+    formLineItemCount = 0;
+    document.getElementById('formLineItemsBody').innerHTML = '';
+    document.getElementById('assignmentPanel').innerHTML = '';
+
+    if (formId) {
+        fetch('/api/forms/' + formId).then(function(r){return r.json();}).then(function(form){
+            if (form.error) { showToast(form.error, 'error'); return; }
+            document.getElementById('formEditorNumber').textContent = form.form_number + '  |  AMT Form No. 004';
+            document.getElementById('formTitle').value = form.title || '';
+            var data = typeof form.form_data === 'string' ? JSON.parse(form.form_data) : form.form_data;
+            document.getElementById('formRequestedBy').value = data.requested_by || '';
+            document.getElementById('formDate').value = data.date || '';
+            document.getElementById('formDepartment').value = data.department || '';
+            document.getElementById('formProjectNo').value = data.project_no || '';
+            document.getElementById('formSigRequestor').value = data.sig_requestor || '';
+            document.getElementById('formSigPM').value = data.sig_pm || '';
+            document.getElementById('formSigCEO').value = data.sig_ceo || '';
+            var items = data.line_items || [];
+            var count = Math.max(items.length, 10);
+            for (var i = 0; i < count; i++) addFormLineItem(items[i] || null);
+            recalcGrandTotal();
+            setFormEditorMode(form.status);
+            loadAssignments(formId);
+            document.getElementById('formEditorModal').style.display = 'flex';
+        });
+    } else {
+        document.getElementById('formEditorNumber').textContent = 'New  |  AMT Form No. 004';
+        document.getElementById('formTitle').value = '';
+        document.getElementById('formRequestedBy').value = '';
+        document.getElementById('formDate').value = new Date().toISOString().substring(0, 10);
+        document.getElementById('formDepartment').value = '';
+        document.getElementById('formProjectNo').value = '';
+        document.getElementById('formSigRequestor').value = '';
+        document.getElementById('formSigPM').value = '';
+        document.getElementById('formSigCEO').value = '';
+        for (var i = 0; i < 10; i++) addFormLineItem(null);
+        recalcGrandTotal();
+        setFormEditorMode('draft');
+        renderAssignmentPanel([]);
+        document.getElementById('formEditorModal').style.display = 'flex';
+    }
+}
+
+function setFormEditorMode(status) {
+    var readOnly = (status === 'submitted' || status === 'approved' || status === 'rejected');
+    var inputs = document.querySelectorAll('#formEditorModal input');
+    for (var i = 0; i < inputs.length; i++) inputs[i].readOnly = readOnly;
+    document.getElementById('btnAddRow').style.display = readOnly ? 'none' : '';
+    document.getElementById('btnSaveDraft').style.display = (status === 'draft') ? '' : 'none';
+    document.getElementById('btnSubmitForm').style.display = (status === 'draft') ? '' : 'none';
+    document.getElementById('btnApproveForm').style.display = (status === 'submitted') ? '' : 'none';
+    document.getElementById('btnRejectForm').style.display = (status === 'submitted') ? '' : 'none';
+    document.getElementById('btnShareForm').style.display = currentFormId ? '' : 'none';
+    document.getElementById('btnDeleteForm').style.display = (currentFormId && status === 'draft') ? '' : 'none';
+    // Remove row delete buttons in read-only mode
+    var delBtns = document.querySelectorAll('.line-item-del');
+    for (var j = 0; j < delBtns.length; j++) delBtns[j].style.display = readOnly ? 'none' : '';
+    // Status badge
+    var badge = document.getElementById('formEditorStatus');
+    var colors = {draft:'var(--primary)',submitted:'var(--warn)',approved:'var(--success)',rejected:'var(--danger)'};
+    badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    badge.style.background = colors[status] || 'var(--text-muted)';
+    badge.style.color = '#fff';
+}
+
+function addFormLineItem(item) {
+    var idx = formLineItemCount++;
+    var tbody = document.getElementById('formLineItemsBody');
+    var tr = document.createElement('tr');
+    var desc = item ? _esc(item.description || '') : '';
+    var qty = item ? (item.qty || '') : '';
+    var rate = item ? (item.unit_rate || '') : '';
+    var amt = item ? (item.amount ? parseFloat(item.amount).toFixed(2) : '') : '';
+    tr.id = 'formRow_' + idx;
+    tr.innerHTML = '<td style="text-align:center;color:var(--text-muted);font-size:12px">' + (idx + 1) + '</td>' +
+        '<td><input type="text" id="formDesc_'+idx+'" value="'+desc+'" style="width:100%;border:1px solid var(--border);padding:6px 8px;border-radius:6px;background:var(--card);color:var(--text);font-size:13px"></td>' +
+        '<td><input type="number" id="formQty_'+idx+'" value="'+qty+'" min="0" step="1" oninput="recalcLineItem('+idx+')" style="width:100%;border:1px solid var(--border);padding:6px 8px;border-radius:6px;text-align:right;background:var(--card);color:var(--text);font-size:13px"></td>' +
+        '<td><input type="number" id="formRate_'+idx+'" value="'+rate+'" min="0" step="0.01" oninput="recalcLineItem('+idx+')" style="width:100%;border:1px solid var(--border);padding:6px 8px;border-radius:6px;text-align:right;background:var(--card);color:var(--text);font-size:13px"></td>' +
+        '<td><input type="text" id="formAmt_'+idx+'" value="'+amt+'" readonly style="width:100%;border:1px solid var(--border);padding:6px 8px;border-radius:6px;text-align:right;background:var(--bg);color:var(--text);font-weight:600;font-size:13px"></td>' +
+        '<td><button class="btn btn-ghost btn-sm line-item-del" onclick="removeFormLineItem('+idx+')" style="padding:2px 6px;color:var(--danger);font-size:16px" title="Remove">&times;</button></td>';
+    tbody.appendChild(tr);
+}
+
+function removeFormLineItem(idx) {
+    var row = document.getElementById('formRow_' + idx);
+    if (row) row.remove();
+    recalcGrandTotal();
+}
+
+function recalcLineItem(idx) {
+    var qty = parseFloat(document.getElementById('formQty_' + idx).value) || 0;
+    var rate = parseFloat(document.getElementById('formRate_' + idx).value) || 0;
+    var amount = qty * rate;
+    document.getElementById('formAmt_' + idx).value = amount ? amount.toFixed(2) : '';
+    recalcGrandTotal();
+}
+
+function recalcGrandTotal() {
+    var total = 0;
+    var amts = document.querySelectorAll('[id^="formAmt_"]');
+    for (var i = 0; i < amts.length; i++) total += parseFloat(amts[i].value) || 0;
+    document.getElementById('formGrandTotal').textContent = total.toLocaleString('en-SA', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function collectFormData() {
+    var lineItems = [];
+    var rows = document.querySelectorAll('#formLineItemsBody tr');
+    var itemNo = 1;
+    rows.forEach(function(row) {
+        var idx = row.id.replace('formRow_', '');
+        var desc = document.getElementById('formDesc_' + idx);
+        if (!desc) return;
+        lineItems.push({
+            item_no: itemNo++,
+            description: desc.value,
+            qty: parseFloat(document.getElementById('formQty_' + idx).value) || 0,
+            unit_rate: parseFloat(document.getElementById('formRate_' + idx).value) || 0,
+            amount: parseFloat(document.getElementById('formAmt_' + idx).value) || 0
+        });
+    });
+    var totalEl = document.getElementById('formGrandTotal');
+    return {
+        requested_by: document.getElementById('formRequestedBy').value,
+        date: document.getElementById('formDate').value,
+        department: document.getElementById('formDepartment').value,
+        project_no: document.getElementById('formProjectNo').value,
+        sig_requestor: document.getElementById('formSigRequestor').value,
+        sig_pm: document.getElementById('formSigPM').value,
+        sig_ceo: document.getElementById('formSigCEO').value,
+        line_items: lineItems,
+        grand_total: parseFloat(totalEl.textContent.replace(/,/g, '')) || 0
+    };
+}
+
+function saveFormDraft() {
+    var formData = collectFormData();
+    var title = document.getElementById('formTitle').value || formData.requested_by + ' - ' + formData.date;
+    var payload = {form_data: formData, title: title, created_by: formData.requested_by, updated_by: formData.requested_by};
+
+    if (currentFormId) {
+        fetch('/api/forms/' + currentFormId, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+            .then(function(r){return r.json();}).then(function(d){
+                if(d.error){showToast(d.error,'error');return;}
+                showToast('Draft saved','success');
+                fetchForms();
+            }).catch(function(){showToast('Save failed','error');});
+    } else {
+        payload.form_type = 'requisition';
+        if (currentFormTemplateId) payload.template_id = currentFormTemplateId;
+        fetch('/api/forms', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+            .then(function(r){return r.json();}).then(function(d){
+                if(d.error){showToast(d.error,'error');return;}
+                currentFormId = d.id;
+                document.getElementById('formEditorNumber').textContent = d.form_number + '  |  AMT Form No. 004';
+                document.getElementById('btnShareForm').style.display = '';
+                document.getElementById('btnDeleteForm').style.display = '';
+                showToast('Draft saved as ' + d.form_number,'success');
+                fetchForms();
+            }).catch(function(){showToast('Save failed','error');});
+    }
+}
+
+function submitForm() {
+    if (!currentFormId) {
+        // Save first, then submit
+        var formData = collectFormData();
+        var title = document.getElementById('formTitle').value || formData.requested_by + ' - ' + formData.date;
+        fetch('/api/forms', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({form_type:'requisition', form_data:formData, title:title, created_by:formData.requested_by})})
+            .then(function(r){return r.json();}).then(function(d){
+                currentFormId = d.id;
+                return fetch('/api/forms/'+d.id+'/submit',{method:'POST'});
+            }).then(function(r){return r.json();}).then(function(d){
+                showToast('Form submitted','success');
+                setFormEditorMode('submitted');
+                fetchForms();
+            }).catch(function(){showToast('Submit failed','error');});
+    } else {
+        // Save current data then submit
+        var formData = collectFormData();
+        var title = document.getElementById('formTitle').value;
+        fetch('/api/forms/'+currentFormId, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({form_data:formData, title:title})})
+            .then(function(){return fetch('/api/forms/'+currentFormId+'/submit',{method:'POST'});})
+            .then(function(r){return r.json();}).then(function(d){
+                showToast('Form submitted','success');
+                setFormEditorMode('submitted');
+                fetchForms();
+            }).catch(function(){showToast('Submit failed','error');});
+    }
+}
+
+function approveForm() {
+    var approver = prompt('Approved by (your name):');
+    if (approver === null) return;
+    fetch('/api/forms/'+currentFormId+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approved_by:approver})})
+        .then(function(r){return r.json();}).then(function(d){
+            showToast('Form approved','success');
+            setFormEditorMode('approved');
+            fetchForms();
+        }).catch(function(){showToast('Approve failed','error');});
+}
+
+function rejectForm() {
+    if(!confirm('Reject this form?')) return;
+    fetch('/api/forms/'+currentFormId+'/reject',{method:'POST'})
+        .then(function(r){return r.json();}).then(function(d){
+            showToast('Form rejected','success');
+            setFormEditorMode('rejected');
+            fetchForms();
+        }).catch(function(){showToast('Reject failed','error');});
+}
+
+function deleteForm(id) {
+    if(!confirm('Delete this form?')) return;
+    fetch('/api/forms/'+id,{method:'DELETE'})
+        .then(function(r){return r.json();}).then(function(d){
+            showToast('Form deleted','success');
+            closeFormEditor();
+            fetchForms();
+        }).catch(function(){showToast('Delete failed','error');});
+}
+
+function downloadFormPDF() {
+    if (!currentFormId) {
+        showToast('Save the form first','error');
+        return;
+    }
+    window.open('/api/forms/' + currentFormId + '/pdf');
+}
+
+function shareForm(id) {
+    fetch('/api/forms/' + id + '/share', {method: 'POST'})
+        .then(function(r){return r.json();}).then(function(d) {
+            var url = window.location.origin + '/?form=' + d.token;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(function() {
+                    showToast('Share link copied to clipboard!', 'success');
+                });
+            } else {
+                prompt('Copy this share link:', url);
+            }
+        }).catch(function(){showToast('Share failed','error');});
+}
+
+function closeFormEditor() {
+    document.getElementById('formEditorModal').style.display = 'none';
+    currentFormId = null;
+    currentFormTemplateId = null;
+}
+
+// ---- Assignment Functions ----
+var currentFormAssignments = [];
+var currentSignerRole = null;
+
+function toggleAssignPanel() {
+    var panel = document.getElementById('assignmentPanel');
+    var icon = document.getElementById('assignToggleIcon');
+    if (panel.style.display === 'none') {
+        panel.style.display = '';
+        icon.innerHTML = '&#9650;';
+    } else {
+        panel.style.display = 'none';
+        icon.innerHTML = '&#9660;';
+    }
+}
+
+function loadAssignments(formId) {
+    fetch('/api/forms/' + formId + '/assignments').then(function(r){return r.json();}).then(function(d){
+        currentFormAssignments = d.assignments || [];
+        renderAssignmentPanel(currentFormAssignments);
+        checkSignerMode();
+    });
+}
+
+function renderAssignmentPanel(assignments) {
+    var panel = document.getElementById('assignmentPanel');
+    var members = classificationOptions.team_members || [];
+    var memberOptions = '<option value="">-- Select --</option>' + members.map(function(m){
+        var label = m.name;
+        if (m.role) label += ' (' + m.role + ')';
+        return '<option value="'+_esc(m.name)+'">'+_esc(label)+'</option>';
+    }).join('');
+
+    var roles = [
+        {key: 'requestor', label: 'Requestor'},
+        {key: 'project_manager', label: 'Project Manager'},
+        {key: 'ceo', label: 'CEO'}
+    ];
+
+    var html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">';
+    roles.forEach(function(role) {
+        var existing = assignments.find(function(a){ return a.role === role.key; });
+        var selectedName = existing ? existing.assignee_name : '';
+        var statusHtml = '';
+        if (existing) {
+            if (existing.status === 'signed') {
+                statusHtml = '<span style="color:var(--success);font-size:11px;margin-top:4px;display:block">&#10003; Signed</span>';
+            } else {
+                statusHtml = '<span style="color:var(--warn);font-size:11px;margin-top:4px;display:block">&#9679; Pending</span>';
+            }
+        }
+        html += '<div class="form-group"><label>'+role.label+'</label>';
+        html += '<select id="assign_'+role.key+'" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">';
+        html += memberOptions.replace('value="'+_esc(selectedName)+'"', 'value="'+_esc(selectedName)+'" selected');
+        html += '</select>';
+        html += statusHtml;
+        html += '</div>';
+    });
+    html += '</div>';
+    html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">';
+    html += '<button class="btn btn-primary btn-sm" onclick="saveAssignments()">Save Assignments</button>';
+    html += '</div>';
+    panel.innerHTML = html;
+}
+
+function saveAssignments() {
+    if (!currentFormId) {
+        showToast('Save the form first before assigning', 'error');
+        return;
+    }
+    var roles = ['requestor', 'project_manager', 'ceo'];
+    var assignments = [];
+    roles.forEach(function(role) {
+        var sel = document.getElementById('assign_' + role);
+        if (sel && sel.value) {
+            assignments.push({role: role, assignee_name: sel.value});
+        }
+    });
+    fetch('/api/forms/' + currentFormId + '/assign', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({assignments: assignments})
+    }).then(function(r){return r.json();}).then(function(d){
+        if (d.error) { showToast(d.error, 'error'); return; }
+        showToast('Assignments saved', 'success');
+        loadAssignments(currentFormId);
+        fetchForms();
+    }).catch(function(){ showToast('Save failed', 'error'); });
+}
+
+function checkSignerMode() {
+    // Check if current user is an assigned signer via URL param or localStorage
+    var params = new URLSearchParams(window.location.search);
+    var signerName = params.get('signer') || currentSignerName;
+    var signBtn = document.getElementById('btnSignForm');
+    signBtn.style.display = 'none';
+    currentSignerRole = null;
+
+    if (!signerName || !currentFormAssignments.length) return;
+
+    var myAssignment = currentFormAssignments.find(function(a) {
+        return a.assignee_name === signerName && a.status === 'pending';
+    });
+    if (myAssignment) {
+        currentSignerRole = myAssignment.role;
+        signBtn.style.display = '';
+        signBtn.textContent = 'Sign as ' + {requestor:'Requestor',project_manager:'PM',ceo:'CEO'}[myAssignment.role];
+        // Make the corresponding signature field editable even in read-only mode
+        var sigFieldMap = {requestor:'formSigRequestor', project_manager:'formSigPM', ceo:'formSigCEO'};
+        var field = document.getElementById(sigFieldMap[myAssignment.role]);
+        if (field) {
+            field.readOnly = false;
+            field.style.borderColor = '#0d6efd';
+            field.style.background = '#f0f7ff';
+            field.placeholder = 'Type your name to sign';
+        }
+    }
+}
+
+function signCurrentForm() {
+    if (!currentFormId || !currentSignerRole) return;
+    var params = new URLSearchParams(window.location.search);
+    var signerName = params.get('signer') || currentSignerName;
+    if (!signerName) {
+        signerName = prompt('Enter your name to sign:');
+        if (!signerName) return;
+    }
+    // Get the signature value from the field
+    var sigFieldMap = {requestor:'formSigRequestor', project_manager:'formSigPM', ceo:'formSigCEO'};
+    var sigField = document.getElementById(sigFieldMap[currentSignerRole]);
+    var sigValue = sigField ? sigField.value.trim() : '';
+    if (!sigValue) {
+        showToast('Please type your name in the signature field first', 'error');
+        return;
+    }
+
+    fetch('/api/forms/' + currentFormId + '/sign', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({role: currentSignerRole, signer_name: signerName})
+    }).then(function(r){return r.json();}).then(function(d){
+        if (d.error) { showToast(d.error, 'error'); return; }
+        showToast(d.message, 'success');
+        if (d.auto_approved) {
+            setFormEditorMode('approved');
+        }
+        loadAssignments(currentFormId);
+        fetchForms();
+    }).catch(function(){ showToast('Sign failed', 'error'); });
+}
+
+// Auto-open shared form from URL
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    var formToken = params.get('form');
+    var signerParam = params.get('signer');
+    if (signerParam) {
+        currentSignerName = signerParam;
+        localStorage.setItem('formSignerName', signerParam);
+    }
+    if (formToken) {
+        setTimeout(function() {
+            switchTab('templates');
+            switchSubTab('forms');
+            fetch('/api/forms/shared/' + formToken)
+                .then(function(r){return r.json();}).then(function(form) {
+                    if (form.error) { showToast('Form not found', 'error'); return; }
+                    openFormEditor(form.id);
+                });
+        }, 500);
+    }
+})();
+
 // ---- Keyboard ----
-document.addEventListener('keydown',function(e){if(e.key==='Escape'&&currentModalId)closeDetailModal();});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&currentModalId)closeDetailModal();if(e.key==='Escape')closeFormEditor();});
 
 // ---- Init ----
 fetchClassificationOptions(); fetchClassifierInfo(); fetchStatus(); fetchPending(); fetchActivitySummary();

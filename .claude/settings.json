@@ -10,7 +10,9 @@
       "Bash(echo \"$key: SET \\($val:0:8...\\)\")",
       "Bash(fi)",
       "Bash(done)",
-      "Bash(pip install groq anthropic)"
+      "Bash(pip install groq anthropic)",
+      "Bash(pdftotext \"/home/malkhalifa/DocumentControl/Internal Request Form - 2026.pdf\" -)",
+      "Bash(grep -n \"config\\\\|price\\\\|quantity\\\\|form\" /home/malkhalifa/DocumentControl/config/*.yaml)"
     ]
   }
 }
